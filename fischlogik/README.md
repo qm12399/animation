@@ -1,6 +1,6 @@
-# new-channel
+# Fischlogik
 
-Kênh mới, tách riêng khỏi các kênh khác. Video làm bằng code theo thư viện
+Kênh TikTok tiếng Đức về mẹo câu cá, tách riêng khỏi các kênh khác. Video làm bằng code theo thư viện
 [lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (canvas/WebGL render từng frame, TTS, nhạc tự viết, mux ffmpeg).
 
 Trạng thái: **đang gom thông tin, chưa sản xuất**. Chờ video mẫu và lệnh bắt đầu.
@@ -8,7 +8,7 @@ Trạng thái: **đang gom thông tin, chưa sản xuất**. Chờ video mẫu v
 ## Cấu trúc dự kiến
 
 ```
-new-channel/
+fischlogik/
   README.md        file này
   SETUP.md         cách cài và chạy thư viện trong container cloud
   BRIEF.md         style, ngôn ngữ, giọng, độ dài, khung hình (điền sau khi có video mẫu)
