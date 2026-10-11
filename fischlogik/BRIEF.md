@@ -4,7 +4,8 @@
 |---|---|
 | Kênh | Fischlogik (TikTok, tiếng Đức) |
 | Chủ đề | mẹo câu cá giải thích bằng hình: cá ở đâu, vì sao |
-| Tham chiếu | `REFERENCE.md` (style và nhịp như video mẫu, nhận diện riêng) |
+| Tham chiếu | `STYLEGUIDE.md` (chuẩn visual, bắt buộc), `REFERENCE.md` (kịch bản mẫu) |
+| Mở đầu | luôn là cảnh người câu tung cần, mồi bay, crane lên bản đồ (STYLEGUIDE §5) |
 | Khung hình | 9:16, 720x1280, 30 fps |
 | Độ dài | 45-60 s, tối đa 120 s |
 | Hình | 3D stylized đầy đủ như mẫu: bản đồ ao từ trên xuống, mặt cắt dưới nước, cảnh ngang mặt nước, nhân vật người câu cá |
