@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script></head><body>
+<script type="module">
+import { THREE, V3, draw, TIME } from './engine/core.js';
+import { buildLake, shore, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, castPose } from './engine/angler.js';
+const img = new Image(); img.src = 'engine/fonts/logo.png'; await img.decode(); await document.fonts.load('800 20px PJS');
+const L = buildLake(img), A = makeAngler(img); L.scene.add(A.root);
+const spot = shore(PLACES.bankTh, 2.2); spot.y = L.terrainHeight(spot.x, spot.z); A.root.position.copy(spot); A.root.rotation.y = 0;
+const cam = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, .1, 900);
+window.DUR = 4;
+window.render = t => {
+  TIME.value = t + 10;
+  const view = Math.floor(t);
+  if (view === 0) { L.setFog(250, 700); L.setReflect(false); L.shadowFocus(V3(), 70); cam.position.set(0, 120, 4); cam.up.set(0, 0, -1); cam.lookAt(0, 0, 0); draw(L.scene, cam, { vig: .5 }); }
+  else { L.setFog(45, 260); L.setReflect(true); L.shadowFocus(spot, 15); cam.up.set(0, 1, 0);
+    A.apply(view === 1 ? POSES.idle : view === 2 ? castPose(.4) : castPose(.6), t);
+    cam.position.copy(spot).add(V3(-1.6, 2.3, 6.5)); cam.lookAt(spot.clone().add(V3(-2.6, 1.2, -8))); draw(L.scene, cam, { focus: 4.5, aper: 6 }); }
+};
+window.READY = true;
+</script></body></html>

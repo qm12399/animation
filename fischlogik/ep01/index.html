@@ -1,0 +1,325 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, glowPoints, rng } from './engine/core.js';
+import { buildLake, shore, sdist, lakeR, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, castPose, walkPose, blendPose } from './engine/angler.js';
+import { makeFish, makeSchool, placeSchool } from './engine/fish.js';
+import { buildUnder, bedHeight } from './engine/under.js';
+import { buildSection, buildBankCut, THERMO } from './engine/section.js';
+import * as UI from './engine/ui.js';
+const { C } = UI;
+
+// ---------------- assets ----------------
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['Mitte', 'mitten', 'Fisch', 'Schichten', 'warmes', '24', 'kaltes', 'Sprungschicht', 'vier', 'Sauerstoff', 'Zone', 'sauerstofffreie', 'atmen', 'Barsch', 'Hecht', 'Füßen', 'Scharkante', 'drei', 'stampfst', 'Abstand', 'parallel', 'Wind', 'Uferseite', 'Rotaugen', 'Hechte', 'Gesicht', 'Bacheinläufen', 'Krautkanten', 'Licht', 'Seemitte', 'Kanten']));
+
+// ---------------- worlds ----------------
+const L = buildLake(logo), A = makeAngler(logo); L.scene.add(A.root);
+const U = buildUnder(), X = buildSection(), B = buildBankCut();
+const A2 = makeAngler(logo); B.scene.add(A2.root);
+const cam = new THREE.PerspectiveCamera(46, W / H, .1, 1200);
+const CENTER = V3(0, .1, 0);
+const spot = shore(PLACES.bankTh, 2.4); spot.y = L.terrainHeight(spot.x, spot.z);
+const windSpot = shore(PLACES.windTh, 2.2); windSpot.y = L.terrainHeight(windSpot.x, windSpot.z);
+const backSpot = shore(PLACES.bankTh, 5.5); backSpot.y = L.terrainHeight(backSpot.x, backSpot.z);
+
+// extra lake actors: plankton + roach school as glow points (map view)
+const R = rng(42);
+const plank = []; for (let i = 0; i < 260; i++) { const a = R() * 6.3, rr = Math.sqrt(R()) * .8, [ex, ez] = lakeR(a); const tgt = shore(PLACES.windTh + (R() - .5) * 1.1, -.8 - R() * 3); plank.push({ a: V3(ex * rr, .15, ez * rr), b: tgt, d: R() * .5 }); }
+const plankPts = glowPoints(plank.map(p => p.a), .55, [1.4, 1.8, 1.2]); L.scene.add(plankPts);
+const roach = []; for (let i = 0; i < 26; i++) roach.push({ o: V3((R() - .5) * 5, .2, (R() - .5) * 4), d: R() * .3 });
+const roachPts = glowPoints(roach.map(r => r.o), 1.3, [1.6, 1.9, 2.4]); L.scene.add(roachPts);
+function lakeActors(t) {
+  const kp = eio(seg(t, 42.2, 45.2)), pp = plankPts.geometry.attributes.position;
+  plank.forEach((p, i) => { const k = clamp(kp * 1.25 - p.d * .5); const q = p.a.clone().lerp(p.b, eio(k)); q.x += Math.sin(t * 1.3 + i) * .25; pp.setXYZ(i, q.x, q.y, q.z); });
+  pp.needsUpdate = true; plankPts.material.opacity = seg(t, 41.4, 42.2) * (1 - seg(t, 47.2, 47.6));
+  const kr = eio(seg(t, 45.3, 47.3)), c0 = V3(-6, .2, 6), c1 = shore(PLACES.windTh, -4.5).setY(.2), rp = roachPts.geometry.attributes.position;
+  roach.forEach((r, i) => { const q = c0.clone().lerp(c1, clamp(kr * 1.2 - r.d)).add(r.o); q.x += Math.sin(t * 2 + i) * .3; rp.setXYZ(i, q.x, q.y, q.z); });
+  rp.needsUpdate = true; roachPts.material.opacity = seg(t, 45.2, 45.6) * (1 - seg(t, 47.2, 47.5));
+}
+
+// underwater actors
+const perch = makeFish('barsch', .55); const pike = makeFish('hecht', 1.25, { amp: .06, freq: 6 });
+const perch2 = makeFish('barsch', .45);
+U.scene.add(perch, pike, perch2);
+const schoolList = []; { const r = rng(8); for (let i = 0; i < 46; i++) schoolList.push({ p: V3((r() - .5) * 3.2, (r() - .5) * 1.4, (r() - .5) * 1.6), yaw: (r() - .5) * .25, s: .8 + r() * .4, phase: r() * 6 }); }
+const school = makeSchool('rotauge', .32, schoolList); U.scene.add(school);
+const xPerch = makeFish('barsch', .7); X.scene.add(xPerch);
+const bPerch = makeFish('barsch', .55), bPike = makeFish('hecht', 1.1, { amp: .06, freq: 6 }); B.scene.add(bPerch, bPike);
+
+// ---------------- helpers ----------------
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0) { f.position.copy(p); f.rotation.set(0, yaw, pitch); f.material.userData.phase.value = phase; }
+const sp = p => toScreen(cam, p);
+function lakeMode(t, { refl = false, focus, aper = 0, fishGlow = true, wind = .3, map = 0, dead = 0, fog = [250, 900], shadow = [V3(), 70], sat } = {}) {
+  TIME.value = t; L.setReflect(refl); L.setFog(...fog); L.shadowFocus(...shadow); L.fishGlow.visible = fishGlow;
+  const wu = L.water.material.uniforms; wu.uWind.value = wind; wu.uMap.value = map; wu.uDead.value = dead;
+  L.fishGlow.material.opacity = .75 + .25 * Math.sin(t * 2.6);
+  lakeActors(t);
+  draw(L.scene, cam, { focus, aper, vig: refl ? .32 : .5, bloom: .45, sat });
+}
+const lurePath = (() => { let cache = null; return () => cache || (cache = (() => { A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(castPose(.62)); const a = A.tipWorld(), ctrl = a.clone().lerp(CENTER, .45).add(V3(0, 34, 0)), pts = []; for (let i = 0; i <= 70; i++) { const u = i / 70; pts.push(a.clone().multiplyScalar((1 - u) ** 2).add(ctrl.clone().multiplyScalar(2 * u * (1 - u))).add(CENTER.clone().multiplyScalar(u * u))); } return pts; })()); })();
+const lureAt = u => { const P = lurePath(), f = clamp(u) * (P.length - 1), i = Math.min(P.length - 2, Math.floor(f)); return P[i].clone().lerp(P[i + 1], f - i); };
+
+// ---------------- shots ----------------
+// each: [t0, t1, render3D(t), overlay(t)]
+const SHOTS = [];
+const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+
+// 1+2+3: cast -> follow the lure -> crane up to the map -> title -> dive
+const LURE0 = .66, LURE1 = 2.75;
+shot(0, 8.75, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(castPose(t - .04), t);
+  const lu = lureAt(eo(seg(t, LURE0, LURE1)) * .35 + seg(t, LURE0, LURE1) * .65);
+  const P = keys([[0, spot.clone().add(V3(.45, 1.9, 4.4))], [1.25, spot.clone().add(V3(.45, 1.7, 4.2))], [2.15, spot.clone().add(V3(0, 26, 12))], [3.05, V3(0, 78, 16)], [3.7, V3(0, 92, 2.5)], [8.25, V3(1.2, 82, 1.5)], [8.75, V3(0, 8, .5)]], t, eio);
+  if (t > 8.25) P.copy(V3(1.2, 82, 1.5).lerp(V3(0, 6, .3), ei(seg(t, 8.25, 8.75))));
+  const look0 = spot.clone().add(V3(.9, 3.0, -10));
+  const w = ss(seg(t, .55, 1.2)) * (1 - ss(seg(t, 1.9, 3.0)));
+  const at = look0.clone().lerp(lu, w * .85).lerp(CENTER, ss(seg(t, 1.9, 3.1)));
+  const upK = ss(seg(t, 2.0, 3.6)); const up = V3(0, 1 - upK, -upK);
+  lookFrom(cam, P, at, up);
+  const high = P.y > 20;
+  lakeMode(t, { refl: !high, focus: high ? 1e6 : 6, aper: high ? 0 : 4, fishGlow: t > 2.6, map: seg(t, 6.6, 7.6) * .9, fog: high ? [200, 900] : [45, 300], shadow: high ? [V3(), 70] : [spot, 16] });
+}, t => {
+  // lure glow + dotted trail
+  const k = seg(t, LURE0, LURE1);
+  if (t > LURE0 && t < 4) {
+    const P = lurePath(), n = Math.floor(k * (P.length - 1));
+    UI.dots(cam, P.slice(0, n + 1), 1, { r: 2.8, glow: true, alpha: 1 - seg(t, 5.3, 5.8) });
+    if (k < 1) { const s = sp(lureAt(eo(k) * .35 + k * .65)); UI.g.save(); UI.g.fillStyle = '#fff6e0'; UI.g.shadowColor = '#ffe9b0'; UI.g.shadowBlur = 24 * S; UI.g.beginPath(); UI.g.arc(s.x, s.y, 7 * S, 0, 7); UI.g.fill(); UI.g.restore(); }
+  } else if (t >= 4) UI.dots(cam, lurePath(), 1, { r: 2.8, alpha: 1 - seg(t, 5.3, 5.8) });
+  const kp = seg(t, LURE1, LURE1 + .9); if (kp > 0 && kp < 1) UI.ring(cam, CENTER, .5 + kp * 4, 1 - kp, 'rgba(255,255,255,.9)', { n: 40 });
+  // empty middle
+  const kr = seg(t, 3.5, 4.1) * (1 - seg(t, 5.6, 6.0));
+  UI.ring(cam, CENTER, 7, kr, 'rgba(240,120,110,.95)', { n: 46, dot: 2.6 });
+  if (kr > 0) { const s = sp(V3(0, .1, -7)), c = sp(CENTER); UI.callout('0 Fische', s.x, s.y, 0, -46, seg(t, 4.4, 4.9) * (1 - seg(t, 5.6, 6.0)), { dot: C.red }); }
+  UI.title(1, [['Wo stehen die', 0]], [['Fische', 1], [' im See?', 0]], seg(t, 5.9, 6.4) * (1 - seg(t, 8.0, 8.35)));
+});
+
+// 4+5: cross-section
+shot(8.75, 21.95, t => {
+  TIME.value = t; X.update(t);
+  const u = X.slabM.uniforms; u.uLayers.value = ss(seg(t, 8.8, 9.6)); u.uReveal.value = eio(seg(t, 13.0, 14.0)); u.uDead.value = ss(seg(t, 16.5, 19.4));
+  X.oxM.opacity = seg(t, 15.2, 15.8) * lerp(.9, .15, seg(t, 16.6, 19.2));
+  const pz = keys([[8.75, 16.5], [14.5, 14.6], [21.95, 13.4]], t, eio), py = keys([[8.75, -1.6], [14.5, -2.1], [21.95, -3.3]], t, eio);
+  lookFrom(cam, V3(lerp(-.3, .3, seg(t, 8.75, 21.95)), py, pz), V3(0, py - .2, 0));
+  fishAt(xPerch, V3(lerp(-3.5, 3.5, seg(t, 8.75, 16)), -1.1 + .15 * Math.sin(t), .5), 0, .03 * Math.sin(t * 2), t * 0);
+  draw(X.scene, cam, { vig: .42, bloom: .3, sat: .9 });
+}, t => {
+  UI.chapter('1', 'ZWEI SCHICHTEN', 'im Sommer', seg(t, 9.0, 9.4) * (1 - seg(t, 14.3, 14.6)));
+  UI.chapter('2', 'KEIN SAUERSTOFF', 'ab etwa 4 m Tiefe', seg(t, 14.7, 15.1));
+  const a = s => sp(s);
+  { const s = a(V3(-2.0, -1.0, 0)); UI.callout('Warm · 24 °C', s.x, s.y, 38, 0, seg(t, 10.2, 10.75), { dot: C.orange }); }
+  { const s = a(V3(-2.0, -4.6, 0)); UI.callout('Kalt', s.x, s.y, 38, 0, seg(t, 11.7, 12.2), { dot: C.blue }); }
+  { const s = a(V3(1.4, -THERMO, 0)); UI.callout('Sprungschicht', s.x, s.y, -30, -44, seg(t, 13.9, 14.4), { dot: '#cfe3df' }); }
+  const s0 = a(V3(-3, 0, 0)), s4 = a(V3(-3, -4, 0)), ppm = (s4.y - s0.y) / 4;
+  UI.depthRuler(26 * S, s0.y, ppm, [0, 2, 4, 6], seg(t, 15.0, 15.7), t > 15.6 ? 4 : -1);
+  UI.polyline(cam, [V3(-8, -4, 0), V3(8, -4, 0)], seg(t, 15.7, 16.4), 'rgba(251,196,100,.85)', 2, [6, 7]);
+  { const s = a(V3(1.0, -5.5, 0)); UI.callout('sauerstofffreie Zone', s.x, s.y, -10, 46, seg(t, 20.5, 21.0), { dot: C.red }); }
+});
+
+// 6: perch avoids the dead zone
+shot(21.95, 25.6, t => {
+  TIME.value = t; U.setMode('open'); U.update(t); U.murk.visible = true; school.visible = false; pike.visible = false; perch2.visible = false; perch.visible = true;
+  const u = seg(t, 21.95, 25.6);
+  const p = keys([[21.95, V3(10.5, -1.6, 0)], [23.7, V3(13.6, -3.3, 0)], [24.2, V3(14.2, -3.35, .2)], [25.6, V3(15.6, -1.5, .4)]], t, ss);
+  const yaw = t < 23.6 ? 0 : -Math.PI * ss(seg(t, 23.6, 24.4)) * .9, pitch = t < 23.6 ? -.45 : lerp(-.45, .5, ss(seg(t, 23.6, 24.4)));
+  fishAt(perch, p, yaw, pitch, 0);
+  lookFrom(cam, V3(lerp(10.5, 14.5, ss(u)), -2.2, 5.2), V3(lerp(11.5, 14.6, ss(u)), -2.8, 0));
+  draw(U.scene, cam, { focus: 5.2, aper: 3, vig: .5, bloom: .4 });
+}, t => {
+  const s = sp(V3(14.2, -4.3, 0)); UI.callout('kein Sauerstoff', s.x, s.y, 0, 54, seg(t, 24.3, 24.8), { dot: C.red });
+});
+
+// 7: back to the map: dead middle, fish on the edges
+shot(25.6, 27.75, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.idle, t);
+  const P = keys([[25.6, V3(0, 90, 2)], [27.2, V3(0, 80, 8)], [27.75, V3(0, 20, 30)]], t, eio);
+  lookFrom(cam, P, V3(0, 0, lerp(0, 34, ss(seg(t, 27.1, 27.75)))), V3(0, 0, -1));
+  lakeMode(t, { map: .9, dead: .9 });
+}, t => {
+  const pts = []; for (let i = 0; i <= 80; i++) { const th = i / 80 * 6.283, [x, z] = lakeR(th); pts.push(V3(x * .42, .1, z * .42)); }
+  UI.polyline(cam, pts, seg(t, 25.7, 26.3) * (1 - seg(t, 27.3, 27.6)), 'rgba(235,225,210,.75)', 2);
+  { const s = sp(CENTER); UI.callout('tote Zone', s.x, s.y, 0, -40, seg(t, 25.8, 26.2) * (1 - seg(t, 27.3, 27.6)), { dot: C.red }); }
+  { const s = sp(shore(1.9, -2)); UI.callout('Barsch', s.x, s.y, -50, 0, seg(t, 26.3, 26.7) * (1 - seg(t, 27.3, 27.6)), { dot: C.gold }); }
+  { const s = sp(shore(4.4, -2)); UI.callout('Hecht', s.x, s.y, 50, 0, seg(t, 26.84, 27.2) * (1 - seg(t, 27.3, 27.6)), { dot: C.gold }); }
+});
+
+// 8: shallow shelf, the drop-off (Scharkante)
+shot(27.75, 33.35, t => {
+  TIME.value = t; U.setMode('shallow'); U.update(t); U.murk.visible = false; school.visible = false; perch.visible = true; pike.visible = true; perch2.visible = true;
+  const u = seg(t, 27.75, 33.35);
+  { const x1 = .7 + .3 * Math.sin(t * .7), z1 = -1 + u * 1.2; fishAt(perch, V3(x1, bedHeight(x1, z1) + .45, z1), -.25 + .1 * Math.sin(t), 0, 0); }
+  { const x2 = -.6 + .2 * Math.sin(t * .9 + 1), z2 = 1.3 + u * .8; fishAt(perch2, V3(x2, bedHeight(x2, z2) + .4, z2), -.6, 0, 2); }
+  { const z3 = lerp(-2, 1.5, u); fishAt(pike, V3(2.4, bedHeight(2.4, z3) + .7, z3), -1.45, 0, 1); }
+  lookFrom(cam, V3(lerp(-3.6, -2.8, u), lerp(-.55, -.8, u), lerp(5.5, 3.6, u)), V3(lerp(.6, 1.2, u), -2.0, lerp(-.5, 0, u)));
+  draw(U.scene, cam, { focus: 5, aper: 3.5, vig: .45, bloom: .35, sat: .9 });
+}, t => {
+  { const s = sp(V3(1.0, bedHeight(1.0, -.4) + .05, -.4)); UI.callout('Scharkante', s.x, s.y, 0, -70, seg(t, 30.45, 30.9), { dot: C.gold }); }
+  UI.polyline(cam, [V3(-6, -1.15, 1), V3(.9, -1.5, 1)], seg(t, 31.6, 32.2), 'rgba(255,255,255,.85)', 2, [5, 6]);
+  { const s = sp(V3(-2.5, -1.2, 1)); UI.pill('nur 3 m vom Ufer', s.x, s.y - 40 * S, seg(t, 31.7, 32.1), { dot: C.gold }); }
+});
+
+// 9: stomping at the edge scares the fish away (side cutaway)
+const STOMP = 34.62;
+shot(33.35, 36.4, t => {
+  TIME.value = t;
+  const walkEnd = 34.25;
+  const x = lerp(-4.2, -.7, eo(seg(t, 33.35, walkEnd)));
+  let P = walkPose(t - 33.35, 2.2);
+  if (t > walkEnd) P = t < 34.48 ? blendPose(walkPose(walkEnd - 33.35, 2.2), POSES.stompUp, eio(seg(t, walkEnd, 34.48))) : t < STOMP ? blendPose(POSES.stompUp, POSES.stompDn, ei(seg(t, 34.48, STOMP))) : blendPose(POSES.stompDn, POSES.idle, ss(seg(t, STOMP + .3, 36.2)) * .5);
+  A2.root.position.set(x, .44 + (t < walkEnd ? Math.abs(Math.sin((t - 33.35) * 2.2 * Math.PI)) * .03 : 0), 0); A2.root.rotation.y = -Math.PI / 2; A2.apply(P, t);
+  const flee = ei(seg(t, 35.15, 35.9));
+  fishAt(bPerch, V3(1.9 + flee * 9, -.7, .5), flee > 0 ? 0 : Math.PI, 0, 0); fishAt(bPike, V3(3.1 + flee * 11, -.95, -.3), flee > 0 ? 0 : Math.PI, 0, 1);
+  bPerch.material.userData.amp.value = flee > 0 ? .2 : .09;
+  const shake = t > STOMP && t < STOMP + .25 ? Math.sin(t * 90) * .04 * (1 - seg(t, STOMP, STOMP + .25)) : 0;
+  lookFrom(cam, V3(.6, .7 + shake, lerp(10.4, 9.6, seg(t, 33.35, 36.4))), V3(.6, -.2, 0));
+  draw(B.scene, cam, { vig: .38, bloom: .3 });
+}, t => {
+  const foot = sp(V3(-.65, .45, 0));
+  for (let i = 0; i < 3; i++) { const k = seg(t, STOMP + i * .15, STOMP + .9 + i * .15); if (k > 0 && k < 1) UI.screenRing(foot.x, foot.y, (30 + k * 110) * S, 1, 'rgba(255,255,255,.95)', { half: false, n: 28, alpha: 1 - k, sy: .5 }); }
+  UI.callout('Stampf!', foot.x, foot.y, 0, -60, seg(t, STOMP, STOMP + .35) * (1 - seg(t, 36.0, 36.3)), { dot: C.red });
+});
+
+// 10: top-down close: stay back, cast parallel to the bank
+const castT = 37.45;
+const parTarget = shore(PLACES.bankTh + .42, -2.2).setY(.1);
+shot(36.4, 39.6, t => {
+  A.root.position.copy(backSpot); A.root.rotation.y = -1.25; A.apply(castPose(t - castT), t);
+  const P = keys([[36.4, backSpot.clone().add(V3(-1.5, 17, 1))], [38.9, backSpot.clone().add(V3(-2.5, 15, .5))], [39.6, V3(0, 70, 10)]], t, eio);
+  const at = keys([[36.4, backSpot.clone().add(V3(-1.6, 0, -4.2))], [38.9, backSpot.clone().add(V3(-2.6, 0, -4.6))], [39.6, V3(0, 0, 4)]], t, eio);
+  lookFrom(cam, P, at, V3(0, 0, -1));
+  lakeMode(t, { fishGlow: false, shadow: [backSpot, 18] });
+}, t => {
+  const edge = shore(PLACES.bankTh, .2).setY(.4), me = backSpot.clone().setY(.5);
+  const ka = seg(t, 36.8, 37.2) * (1 - seg(t, 38.9, 39.2));
+  UI.polyline(cam, [me, edge], ka, 'rgba(255,255,255,.85)', 2, [4, 6]);
+  { const s = sp(me.clone().lerp(edge, .5)); UI.pill('Abstand halten', s.x + 70 * S, s.y, ka, { dot: C.gold }); }
+  const kc = seg(t, castT + .6, castT + 1.3);
+  if (kc > 0) { A.apply(castPose(.62)); const tip = A.tipWorld(); A.apply(castPose(t - castT)); UI.dots(cam, UI.arcPts(tip, parTarget, 3, 36), kc, { r: 2.6, alpha: 1 - seg(t, 38.9, 39.2) }); }
+  { const s = sp(parTarget); UI.callout('parallel zum Ufer', s.x, s.y, 0, -50, seg(t, castT + 1.3, castT + 1.7) * (1 - seg(t, 38.9, 39.2)), { dot: C.gold }); }
+});
+
+// 11: the wind on the map: plankton and roach drift to the windward bank
+shot(39.6, 47.45, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.idle, t);
+  const P = keys([[39.6, V3(0, 70, 10)], [40.3, V3(0, 88, 3)], [46.9, V3(2.5, 78, 2)], [47.45, V3(6, 14, 0)]], t, eio);
+  const at = keys([[39.6, V3(0, 0, 4)], [40.3, V3(0, 0, 0)], [46.9, V3(2, 0, 0)], [47.45, V3(8, 0, 0)]], t, eio);
+  lookFrom(cam, P, at, V3(0, 0, -1));
+  lakeMode(t, { wind: lerp(.3, 1.2, seg(t, 40.8, 42)), fishGlow: t < 45.2 });
+}, t => {
+  UI.chapter('3', 'DER WIND', 'auflandig', seg(t, 39.4, 39.8) * (1 - seg(t, 47.0, 47.3)));
+  UI.streaks(t, seg(t, 40.8, 41.5) * (1 - seg(t, 47.0, 47.4)), 1, 11, .25, .8);
+  { const s = sp(V3(-12, .2, -14)); UI.pill('Wind  →', s.x, s.y, seg(t, 41.6, 42.0) * (1 - seg(t, 45.2, 45.5)), { dot: '#d9e6f2' }); }
+  { const s = sp(shore(PLACES.windTh, -3).setY(.2)); UI.callout('Plankton & Insekten', s.x, s.y, -40, -70, seg(t, 43.4, 43.9) * (1 - seg(t, 45.2, 45.5)), { dot: C.green }); }
+  { const s = sp(shore(PLACES.windTh, -4.5).setY(.2)); UI.callout('Rotaugen', s.x, s.y, -50, 60, seg(t, 46.0, 46.4) * (1 - seg(t, 47.0, 47.3)), { dot: C.blue }); }
+});
+
+// 12: underwater: the roach school, a pike follows
+shot(47.45, 49.5, t => {
+  TIME.value = t; U.setMode('open'); U.update(t); U.murk.visible = false; school.visible = true; perch.visible = false; perch2.visible = false; pike.visible = true;
+  const u = seg(t, 47.45, 49.5);
+  placeSchool(school, V3(lerp(4, 8.5, u), -1.6, 0), 0);
+  fishAt(pike, V3(lerp(-.5, 5.2, eio(seg(t, 47.6, 49.5))), -1.9, -.6), 0, 0, 0);
+  lookFrom(cam, V3(lerp(4.5, 7.2, u), -2.2, 5.2), V3(lerp(5, 7.6, u), -1.9, 0));
+  draw(U.scene, cam, { focus: 5.2, aper: 3, vig: .5, bloom: .4 });
+}, t => {
+  { const s = sp(V3(lerp(4, 8.5, seg(t, 47.45, 49.5)) + .5, -.9, 0)); UI.callout('Rotaugen', s.x, s.y, 0, -50, seg(t, 47.55, 47.95), { dot: C.blue }); }
+  { const s = sp(V3(lerp(-.5, 5.2, eio(seg(t, 47.6, 49.5))), -1.9, -.6)); UI.callout('Hecht', s.x, s.y, 0, 60, seg(t, 47.8, 48.2), { dot: C.gold }); }
+});
+
+// 13: windward bank: wind in the face
+shot(49.5, 53.1, t => {
+  A.root.position.copy(windSpot); A.root.rotation.y = Math.PI / 2 + .1; A.apply(castPose(t - 50.05), t);
+  const back = V3(1, 0, 0), side = V3(0, 0, 1);
+  const P = windSpot.clone().add(back.clone().multiplyScalar(lerp(4.4, 3.8, seg(t, 49.5, 53.1)))).add(side.clone().multiplyScalar(.6)).add(V3(0, 1.9, 0));
+  lookFrom(cam, P, windSpot.clone().add(V3(-16, 1.7, .8)));
+  lakeMode(t, { refl: true, focus: 4.3, aper: 4, fishGlow: false, wind: 1.3, fog: [45, 300], shadow: [windSpot, 16] });
+}, t => {
+  UI.streaks(t * 1.4, seg(t, 51.0, 51.6) * (1 - seg(t, 52.9, 53.1)), 1, 8, .3, .55);
+  { const s = sp(windSpot.clone().add(V3(-14, 1.2, 2))); UI.callout('Wind ins Gesicht', s.x, s.y, 0, -40, seg(t, 51.5, 51.9), { dot: '#d9e6f2' }); }
+});
+
+// 14: creek inlet + weed edge, 3/4 view from above
+shot(53.1, 56.35, t => {
+  A.root.position.copy(spot); A.apply(POSES.idle, t);
+  const mouth = shore(PLACES.inletTh, -1).setY(0), wc = L.weedCenter;
+  const mid = mouth.clone().lerp(wc, .4), toC = V3(-mid.x, 0, -mid.z).normalize(), side = V3(-toC.z, 0, toC.x);
+  const u = seg(t, 53.1, 56.35);
+  const P = mid.clone().add(toC.clone().multiplyScalar(lerp(15, 12.5, u))).add(side.clone().multiplyScalar(lerp(-3, 2, u))).add(V3(0, lerp(13, 11.5, u), 0)).add(toC.clone().multiplyScalar(4));
+  lookFrom(cam, P, mid.clone().add(toC.clone().multiplyScalar(-2)));
+  lakeMode(t, { refl: true, fishGlow: false, fog: [60, 400], shadow: [mid, 25], focus: 1e6 });
+}, t => {
+  const mouth = shore(PLACES.inletTh, .6).setY(.3), wc = L.weedCenter;
+  { const s = sp(mouth); UI.callout('Bacheinlauf', s.x, s.y, 0, -60, seg(t, 54.3, 54.8), { dot: C.blue }); }
+  { const s = sp(wc.clone().setY(.2)); UI.callout('Krautkante', s.x, s.y, 0, 60, seg(t, 55.55, 56.0), { dot: C.green }); }
+});
+
+// 15: underwater at the weed edge: oxygen bubbles, shade, a pike hiding
+shot(56.35, 58.95, t => {
+  TIME.value = t; U.setMode('weeds'); U.update(t); U.murk.visible = false; school.visible = false; perch.visible = false; perch2.visible = true; pike.visible = true;
+  const u = seg(t, 56.35, 58.95);
+  fishAt(pike, V3(-.6, bedHeight(-.6, 24.6) + .55, 24.6), Math.PI * .92, 0, 0); pike.material.userData.amp.value = .025;
+  fishAt(perch2, V3(.4, bedHeight(.4, 21.5) + .7, 21.5 + u), Math.PI * 1.1, 0, 1);
+  lookFrom(cam, V3(lerp(3.6, 2.4, u), lerp(-1.0, -1.25, u), lerp(21.8, 22.6, u)), V3(-1.2, -1.6, 25.4));
+  draw(U.scene, cam, { focus: lerp(4.4, 3.4, u), aper: 3, vig: .5, bloom: .5 });
+}, t => {
+  { const s = sp(V3(-2.5, -.8, 24)); UI.callout('Sauerstoff', s.x, s.y, 0, -60, seg(t, 57.1, 57.5), { dot: '#bfe8ff' }); }
+  { const s = sp(V3(-.6, bedHeight(-.6, 24.6) + .55, 24.6)); UI.callout('Schutz im Schatten', s.x, s.y, 0, 60, seg(t, 57.85, 58.25), { dot: C.gold }); }
+});
+
+// 16: summary on the map
+shot(58.95, 66.2, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.idle, t);
+  const P = keys([[58.95, V3(0, 80, 2)], [62.4, V3(0, 92, 2)]], t, eio);
+  lookFrom(cam, P, V3(0, 0, 0), V3(0, 0, -1));
+  lakeMode(t, { map: .6 });
+}, t => {
+  const kx = seg(t, 59.5, 60.0);
+  UI.ring(cam, CENTER, 7, kx, 'rgba(240,120,110,.95)', { n: 46, dot: 2.6 });
+  { const s = sp(V3(0, .1, -7)); UI.callout('Seemitte', s.x, s.y, 0, -46, kx, { icon: 'x' }); }
+  const pins = [['Scharkante', shore(PLACES.bankTh + .25, -2), 60.8, -60, 0], ['Windufer', shore(PLACES.windTh, -2), 61.1, -40, -40], ['Bacheinlauf', shore(PLACES.inletTh, -1.5), 61.4, -60, 30], ['Krautkante', L.weedCenter.clone(), 61.7, -60, 40]];
+  pins.forEach(([txt, p, a, dx, dy]) => { const s = sp(p.setY(.2)); UI.callout(txt, s.x, s.y, dx, dy, seg(t, a, a + .4), { dot: C.gold }); });
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 8.75: .32, 21.95: .4, 25.6: .4, 27.75: .3, 36.4: .35, 47.45: .3, 49.5: .4, 53.1: .45, 56.35: .4, 58.95: .45 };
+const glc = renderer.domElement;
+window.DUR = 66.2;
+window.render = t => {
+  UI.clear();
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  // dissolve from the previous shot across a cut
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else {
+    const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); }
+    else s.r3(t);
+  }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 62.45, 1, [['Lass die Mitte links liegen.', 0]], [['Fisch die ', 0], ['Kanten.', 1]], logo);
+};
+window.EV = [
+  { t: .5, type: 'swish' }, { t: 2.75, type: 'plop' }, { t: 8.5, type: 'dive' }, { t: 21.95, type: 'whoosh' }, { t: 25.6, type: 'whoosh' }, { t: 27.6, type: 'dive' },
+  { t: 33.35, type: 'cut' }, { t: STOMP, type: 'thud' }, { t: 35.2, type: 'dart' }, { t: 36.4, type: 'whoosh' }, { t: castT + .5, type: 'swish' }, { t: castT + 1.3, type: 'plop' },
+  { t: 41.0, type: 'gust' }, { t: 47.45, type: 'dive' }, { t: 49.5, type: 'whoosh' }, { t: 50.55, type: 'swish' }, { t: 51.4, type: 'gust' }, { t: 53.1, type: 'whoosh' }, { t: 56.35, type: 'dive' },
+  { t: 58.95, type: 'whoosh' }, { t: 60.8, type: 'tick' }, { t: 61.1, type: 'tick' }, { t: 61.4, type: 'tick' }, { t: 61.7, type: 'tick' }, { t: 62.45, type: 'whoosh' }, { t: 63.1, type: 'ding' },
+];
+window.ENV = [  // ambience beds: [t0, t1, kind]
+  [0, 8.6, 'birds'], [8.6, 27.7, 'under'], [25.6, 27.7, 'birds'], [27.7, 33.35, 'under'], [33.35, 47.45, 'birds'], [40.8, 47.45, 'wind'], [47.45, 49.5, 'under'], [49.5, 53.1, 'wind'], [53.1, 56.35, 'creek'], [56.35, 58.95, 'under'], [58.95, 62.6, 'birds'],
+];
+window.READY = true;
+</script>
+</body></html>
