@@ -30,3 +30,17 @@ Mở thêm host ở: menu environment trên thanh tiêu đề session > Edit > N
 Hướng dẫn: https://code.claude.com/docs/en/cloud-environments#network-access
 
 Không có GPU: style 3D (brick-toy, paper-popup, glass-product...) render chậm qua SwiftShader. Ưu tiên style 2D.
+
+## Sản xuất một tập (đã chạy cho Folge 1)
+
+```sh
+pip: uv pip install --python $LIB/.venv/bin/python faster-whisper edge-tts
+# 1. voice + script -> word timings
+ffmpeg -i voice/voice.mp3 -ac 1 -ar 16000 voice/v16.wav   # rồi chạy Whisper small (de), xem ep01/voice/
+python3 voice/align.py voice/script.txt voice/whisper_words.json voice/words.json
+# 2. render + mix + mux (khoảng 45 phút cho 66 s ở 720x1280, 4 CPU)
+sh epNN/build.sh
+# render lại một đoạn: --q 'off=<giây bắt đầu>&dur=<độ dài>' rồi ghép bằng ffmpeg trim/concat
+```
+Lưu ý: `core/render/mux.sh` lỗi với ffmpeg 6.1 ở container này, dùng `engine/mux.sh`.
+Object động (InstancedMesh/Points đổi vị trí) phải đặt `frustumCulled = false`.

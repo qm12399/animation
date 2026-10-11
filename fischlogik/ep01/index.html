@@ -56,6 +56,7 @@ const schoolList = []; { const r = rng(8); for (let i = 0; i < 46; i++) schoolLi
 const school = makeSchool('rotauge', .32, schoolList); U.scene.add(school);
 const xPerch = makeFish('barsch', .7); X.scene.add(xPerch);
 const bPerch = makeFish('barsch', .55), bPike = makeFish('hecht', 1.1, { amp: .06, freq: 6 }); B.scene.add(bPerch, bPike);
+for (const o of [school, plankPts, roachPts, U.bubbles, perch, pike, perch2, xPerch]) o.frustumCulled = false;
 
 // ---------------- helpers ----------------
 function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
@@ -230,19 +231,19 @@ shot(47.45, 49.5, t => {
   TIME.value = t; U.setMode('open'); U.update(t); U.murk.visible = false; school.visible = true; perch.visible = false; perch2.visible = false; pike.visible = true;
   const u = seg(t, 47.45, 49.5);
   placeSchool(school, V3(lerp(4, 8.5, u), -1.6, 0), 0);
-  fishAt(pike, V3(lerp(-.5, 5.2, eio(seg(t, 47.6, 49.5))), -1.9, -.6), 0, 0, 0);
-  lookFrom(cam, V3(lerp(4.5, 7.2, u), -2.2, 5.2), V3(lerp(5, 7.6, u), -1.9, 0));
+  fishAt(pike, V3(lerp(2.6, 6.4, eio(seg(t, 47.45, 49.6))), -3.35, .4), 0, 0, 0);
+  lookFrom(cam, V3(lerp(4.6, 6.6, u), -2.1, 6.4), V3(lerp(4.9, 6.9, u), -2.1, 0));
   draw(U.scene, cam, { focus: 5.2, aper: 3, vig: .5, bloom: .4 });
 }, t => {
-  { const s = sp(V3(lerp(4, 8.5, seg(t, 47.45, 49.5)) + .5, -.9, 0)); UI.callout('Rotaugen', s.x, s.y, 0, -50, seg(t, 47.55, 47.95), { dot: C.blue }); }
-  { const s = sp(V3(lerp(-.5, 5.2, eio(seg(t, 47.6, 49.5))), -1.9, -.6)); UI.callout('Hecht', s.x, s.y, 0, 60, seg(t, 47.8, 48.2), { dot: C.gold }); }
+  { const s = sp(V3(lerp(4, 8.5, seg(t, 47.45, 49.5)) + .2, -.9, 0)); UI.callout('Rotaugen', s.x - 90 * S, s.y + 30 * S, 0, -50, seg(t, 47.55, 47.95), { dot: C.blue }); }
+  { const s = sp(V3(lerp(2.6, 6.4, eio(seg(t, 47.45, 49.6))) + .3, -3.35, .4)); UI.callout("Hecht", s.x, s.y, 0, 50, seg(t, 47.8, 48.2), { dot: C.gold }); }
 });
 
 // 13: windward bank: wind in the face
 shot(49.5, 53.1, t => {
   A.root.position.copy(windSpot); A.root.rotation.y = Math.PI / 2 + .1; A.apply(castPose(t - 50.05), t);
   const back = V3(1, 0, 0), side = V3(0, 0, 1);
-  const P = windSpot.clone().add(back.clone().multiplyScalar(lerp(4.4, 3.8, seg(t, 49.5, 53.1)))).add(side.clone().multiplyScalar(.6)).add(V3(0, 1.9, 0));
+  const P = windSpot.clone().add(back.clone().multiplyScalar(lerp(4.4, 3.8, seg(t, 49.5, 53.1)))).add(side.clone().multiplyScalar(1.0)).add(V3(0, 1.9, 0));
   lookFrom(cam, P, windSpot.clone().add(V3(-16, 1.7, .8)));
   lakeMode(t, { refl: true, focus: 4.3, aper: 4, fishGlow: false, wind: 1.3, fog: [45, 300], shadow: [windSpot, 16] });
 }, t => {
@@ -295,8 +296,9 @@ shot(58.95, 66.2, t => {
 // ---------------- dispatcher ----------------
 const DISS = { 8.75: .32, 21.95: .4, 25.6: .4, 27.75: .3, 36.4: .35, 47.45: .3, 49.5: .4, 53.1: .45, 56.35: .4, 58.95: .45 };
 const glc = renderer.domElement;
-window.DUR = 66.2;
-window.render = t => {
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 66.2;
+window.render = t => { t += OFF;
   UI.clear();
   const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
   // dissolve from the previous shot across a cut
