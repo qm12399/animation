@@ -14,3 +14,10 @@
 | Nhạc | nền nhẹ tự viết, duck dưới giọng; -14 LUFS |
 | Logo | `brand/logo.svg` |
 | Bắt đầu | chỉ khi người dùng ra hiệu |
+
+## Giao kèm mỗi tập
+
+Mỗi khi xong một tập, gửi kèm cho TikTok:
+- Caption: 1 câu ngắn, tiếng Đức.
+- 5 hashtag: 3 cố định `#fischlogik #angeln #angelntipps` + 2 theo chủ đề tập.
+- Lưu vào `epNN/TIKTOK.txt`.
