@@ -1,0 +1,4 @@
+Fonts: Inter, Playfair Display (SIL Open Font License 1.1), github.com/google/fonts
+3D: three.js (MIT). Render/audio tools: lemo-opuscar core (MIT).
+Placeholder voice: Microsoft Edge neural TTS (de-DE-ConradNeural) via edge-tts. Replace with the channel's own voice.
+Music and sound effects: synthesised in mix.py, original.
