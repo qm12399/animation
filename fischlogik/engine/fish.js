@@ -6,6 +6,9 @@ const SPEC = {
   // prof: radius along the body (tail -> nose); back/belly colours; pattern; fins colour
   barsch: { prof: [0, .07, .1, .16, .21, .23, .22, .19, .14, .07, 0], flat: .55, back: 0x3b4a22, belly: 0xd8d2a0, side: 0x7d8a3c, pattern: 'bars', fin: 0xd2552a, dorsalSpiky: true, len: 1 },
   hecht:  { prof: [0, .05, .07, .095, .11, .115, .11, .1, .085, .06, .02], flat: .6, back: 0x2c3a1c, belly: 0xd9d6b0, side: 0x5b7030, pattern: 'spots', fin: 0x7a6a3a, dorsalBack: true, len: 1 },
+  forelle: { prof: [0, .06, .085, .12, .15, .165, .16, .145, .115, .07, .01], flat: .55, back: 0x4a5a34, belly: 0xe6e2d2, side: 0xb8b8a0, pattern: 'trout', fin: 0x8a8060, len: 1 },
+  ukelei: { prof: [0, .045, .065, .09, .11, .12, .115, .1, .08, .05, 0], flat: .45, back: 0x4f6a78, belly: 0xf2f4f6, side: 0xd4dce2, pattern: 'none', fin: 0xb9c2c6, len: 1 },
+  zander: { prof: [0, .06, .085, .11, .135, .145, .14, .125, .1, .065, .02], flat: .6, back: 0x4a5048, belly: 0xdcdccc, side: 0x8a9080, pattern: 'saddle', fin: 0x8a8a78, dorsalSpiky: true, len: 1 },
   rotauge: { prof: [0, .07, .11, .17, .2, .21, .2, .17, .12, .06, 0], flat: .45, back: 0x34485a, belly: 0xe8ecef, side: 0xb9c3c8, pattern: 'none', fin: 0xc8452e, len: 1 },
 };
 
@@ -27,6 +30,8 @@ export function fishGeometry(kind) {
     col.copy(side).lerp(back, Math.max(0, up)).lerp(belly, Math.max(0, -up) * .9);
     if (sp.pattern === 'bars' && up > -.3 && Math.sin(x * 38) > .45 && x > .15 && x < .8) col.multiplyScalar(.45);
     if (sp.pattern === 'spots' && up > -.4) { const h = Math.sin(x * 91 + up * 17) * Math.sin(x * 57 - z * 40); if (h > .55) col.lerp(new THREE.Color(0xd8d49a), .7); }
+    if (sp.pattern === 'trout') { if (Math.abs(up) < .18) col.lerp(new THREE.Color(0xd08a90), .55); if (up > -.1 && Math.sin(x * 120 + up * 31) * Math.sin(x * 77 - up * 53) > .72) col.multiplyScalar(.25); }
+    if (sp.pattern === 'saddle' && up > -.2 && Math.sin(x * 26 + 1) > .55 && x > .15 && x < .85) col.multiplyScalar(.55);
     if (x > .93) col.multiplyScalar(.8);
   });
   const fin = new THREE.Color(sp.fin), parts = [body];
@@ -62,7 +67,7 @@ export function fishMaterial({ amp = .09, freq = 9 } = {}) {
 
 export function makeFish(kind, length, opts) {
   const m = new THREE.Mesh(fishGeometry(kind), fishMaterial(opts)); m.scale.setScalar(length); m.castShadow = true;
-  const eye = new THREE.Mesh(new THREE.SphereGeometry(.022, 10, 8), new THREE.MeshStandardMaterial({ color: kind === 'rotauge' ? 0x8a1a10 : 0x111111, roughness: .2 }));
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(.022, 10, 8), new THREE.MeshStandardMaterial({ color: kind === 'rotauge' ? 0x8a1a10 : kind === 'zander' ? 0xd8d0b0 : 0x111111, roughness: .2 }));
   const eye2 = eye.clone(); const ey = kind === 'hecht' ? .03 : .05;
   eye.position.set(.38, ey, .07); eye2.position.set(.38, ey, -.07); m.add(eye, eye2);
   return m;

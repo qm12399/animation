@@ -162,3 +162,47 @@ export function depthRuler(x, y0, pxPerM, marks, k, hiM) {   // vertical ruler w
   marks.forEach(m => { const y = y0 + m * pxPerM; if (y > yEnd + 1) return; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 10 * S, y); g.stroke(); g.fillStyle = m === hiM ? C.gold : 'rgba(255,255,255,.85)'; g.fillText(`${m} m`, x + 16 * S, y); });
   g.restore();
 }
+
+// ---------- episode 2 additions ----------
+export function bigStat(num, label, x, y, k) {       // large gold number + small caption
+  if (k <= 0) return;
+  g.save(); g.globalAlpha = clamp(k * 1.6); g.textAlign = 'center'; g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 16 * S;
+  const sc = lerp(.8, 1, back(clamp(k * 1.2))); g.translate(x, y); g.scale(sc, sc);
+  g.font = `italic 900 ${64 * S}px PF`; g.fillStyle = C.gold; g.fillText(num, 0, 0);
+  g.font = F(700, 15); g.fillStyle = '#fff'; g.fillText(label, 0, 30 * S); g.restore();
+}
+export function stack(items, x, y, gap = 46) {          // column of pills: [[text, k, dot], ...]
+  items.forEach(([text, k, dot], i) => pill(text, x, y + i * gap * S, k, { dot: dot || C.gold }));
+}
+export function scoreCard(title, rows, k, y = 210) {    // rows: [[label, ok, k], ...]
+  if (k <= 0) return;
+  const w = 300 * S, rh = 40 * S, h = 64 * S + rows.length * rh, x = W / 2 - w / 2, y0 = y * S;
+  g.save(); g.globalAlpha = clamp(k * 1.6); g.translate(0, (1 - eo(k)) * -14 * S);
+  g.fillStyle = C.pill; g.beginPath(); g.roundRect(x, y0, w, h, 22 * S); g.fill();
+  g.font = F(800, 18); g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(title, x + 22 * S, y0 + 30 * S);
+  const score = rows.filter(r => r[1] && r[2] > .5).length;
+  g.textAlign = 'right'; g.fillStyle = score === rows.length ? C.gold : 'rgba(255,255,255,.75)'; g.font = `italic 900 ${26 * S}px PF`; g.fillText(`${score}/${rows.length}`, x + w - 22 * S, y0 + 30 * S); g.textAlign = 'left';
+  rows.forEach(([label, ok, kr], i) => {
+    const yy = y0 + 64 * S + i * rh + rh / 2 - 6 * S, a = clamp(kr * 2);
+    g.globalAlpha = clamp(k * 1.6) * (.35 + .65 * a); g.font = F(600, 16); g.fillStyle = '#fff'; g.fillText(label, x + 56 * S, yy);
+    const cx = x + 32 * S; g.lineWidth = 3 * S; g.lineCap = 'round';
+    if (a > 0) {
+      g.globalAlpha = clamp(k * 1.6) * a;
+      if (ok) { g.strokeStyle = C.green; g.beginPath(); g.moveTo(cx - 7 * S, yy); g.lineTo(cx - 2 * S, yy + 5 * S); g.lineTo(cx + 8 * S, yy - 6 * S); g.stroke(); }
+      else { g.strokeStyle = C.red; g.beginPath(); g.moveTo(cx - 6 * S, yy - 6 * S); g.lineTo(cx + 6 * S, yy + 6 * S); g.moveTo(cx + 6 * S, yy - 6 * S); g.lineTo(cx - 6 * S, yy + 6 * S); g.stroke(); }
+    }
+  });
+  g.restore();
+}
+export function arrow(x0, y0, x1, y1, k, color = 'rgba(255,255,255,.9)', w = 3) {   // straight arrow drawn up to k
+  if (k <= 0) return; const e = eo(k), x = lerp(x0, x1, e), y = lerp(y0, y1, e), a = Math.atan2(y1 - y0, x1 - x0);
+  g.save(); g.strokeStyle = color; g.fillStyle = color; g.lineWidth = w * S; g.lineCap = 'round'; g.globalAlpha = clamp(k * 2);
+  g.beginPath(); g.moveTo(x0, y0); g.lineTo(x, y); g.stroke();
+  g.beginPath(); g.moveTo(x + Math.cos(a) * 10 * S, y + Math.sin(a) * 10 * S); g.lineTo(x + Math.cos(a + 2.5) * 10 * S, y + Math.sin(a + 2.5) * 10 * S); g.lineTo(x + Math.cos(a - 2.5) * 10 * S, y + Math.sin(a - 2.5) * 10 * S); g.fill();
+  g.restore();
+}
+export function swirl(x, y, r, t, k, color = 'rgba(255,255,255,.85)', dir = 1) {   // dotted spiral = eddy
+  if (k <= 0) return; g.save(); g.fillStyle = color; g.globalAlpha = clamp(k * 2);
+  for (let i = 0; i < 26; i++) { const u = i / 26, a = dir * (u * Math.PI * 3.2 - t * 2.5), rr = r * (.25 + .75 * u); g.beginPath(); g.arc(x + Math.cos(a) * rr, y + Math.sin(a) * rr * .6, (1.4 + u * 1.6) * S, 0, 7); g.fill(); }
+  g.restore();
+}
