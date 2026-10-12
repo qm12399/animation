@@ -71,9 +71,17 @@ Mọi số đo dưới đây tính trên khung 720x1280. Engine của kênh ph�
 3. Dissolve nhanh 0.3-0.5 s giữa 2 cảnh cùng bố cục.
 4. Hard cut chỉ khi đổi hẳn góc nhìn (vd sang S7).
 
-## 5. Mở đầu (yêu cầu kênh)
+## 5. Hook (3 giây đầu)
 
-Không mở bằng bản đồ. 0-2.5 s: S1, người câu lấy đà rồi **tung cần**, mồi phát sáng bay vút lên trời để lại vệt chấm sáng; camera ngước theo mồi, rồi theo mồi rơi xuống, liền một hơi crane lên thành bản đồ S2 với đường chấm từ bờ ra giữa ao. Hook phủ định nói đè lên toàn bộ đoạn này.
+Quy tắc rút ra từ Folge 1 (chạy tốt) và Folge 2 (hook yếu hơn):
+
+1. **Khung đầu tiên = đúng thứ câu thoại đầu tiên đang nói.** Lời nói và hình khớp nhau ngay giây 0, không dựng bối cảnh trước.
+   - F1: "Hör auf, deinen Köder … zu werfen" → mở bằng chính cú tung cần. Đúng.
+   - F2: "Forscher legten eine tote Forelle …" → đáng ra mở cận con cá chết dưới nước, rồi kéo camera ra để lộ trụ cầu và dòng xiết. Bản đã làm mở bằng cây cầu từ xa: sai thứ tự.
+2. **Cận trước, toàn cảnh sau.** Bắt đầu sát chủ thể (cá, mồi, tay, cần), rồi pull-out / crane để lộ bối cảnh. Không mở bằng góc rộng tĩnh.
+3. **Có chuyển động ngay frame 0** (vật đang bay, cá đang trôi, camera đang chạy), không khung đứng.
+4. **Một câu hỏi bằng hình trong 3 s đầu** (vì sao cá chết lại trôi ngược? mồi rơi giữa hồ mà không có cá?).
+5. Treatment mỗi tập phải ghi rõ: câu thoại đầu tiên, chủ thể của nó, và khung hình 0-3 s tương ứng.
 
 ## 6. Âm thanh (đo từ video)
 
