@@ -277,7 +277,7 @@ shot(52.65, 58.85, t => {
   underMode(t, 'shallow', [trout2, flowPts, foodPts, boulderU], { focus: 5.5, aper: 2.5 });
 }, t => {
   { const s = sp(V3(RX + .3, -.6, BOZ + 2.3)); UI.callout('Kehrwasser', s.x, s.y, -40, -70, seg(t, 54.2, 54.6), { dot: C.blue }); }
-  { const a = sp(V3(RX + 2.4, -.2, BOZ - 3)), b = sp(V3(RX + 2.4, -.2, BOZ + 6)); UI.arrow(a.x, a.y, b.x, b.y, seg(t, 55.6, 56.2)); UI.pill('Hauptstrom', (a.x + b.x) / 2, (a.y + b.y) / 2 - 30 * S, seg(t, 55.7, 56.1), { dot: C.gold }); }
+  { const a = sp(V3(RX + 2.4, -.2, BOZ - 3)), b = sp(V3(RX + 2.4, -.2, BOZ + 6)); UI.arrow(a.x, a.y, b.x, b.y, seg(t, 55.6, 56.2)); UI.pill('Hauptstrom', clamp((a.x + b.x) / 2, 110 * S, W - 110 * S), (a.y + b.y) / 2 - 30 * S, seg(t, 55.7, 56.1), { dot: C.gold }); }
 });
 
 // 13: cast right on the current seam (river, top-down with the angler)
