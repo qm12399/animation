@@ -83,6 +83,12 @@ Quy tắc rút ra từ Folge 1 (chạy tốt) và Folge 2 (hook yếu hơn):
 4. **Một câu hỏi bằng hình trong 3 s đầu** (vì sao cá chết lại trôi ngược? mồi rơi giữa hồ mà không có cá?).
 5. Treatment mỗi tập phải ghi rõ: câu thoại đầu tiên, chủ thể của nó, và khung hình 0-3 s tương ứng.
 
+## 5b. Thẻ tiêu đề tập (bắt buộc mỗi tập)
+
+Mỗi tập PHẢI có thẻ tiêu đề: kicker `FISCHLOGIK · FOLGE N` + 2 dòng serif nghiêng, 1 từ vàng (`UI.title`).
+- Vị trí: ngay sau hook, khoảng giây 4-7, hiện tối thiểu 2.5 s, đè lên một cảnh đang chuyển động (không phải nền đứng).
+- Tập 3 bị thiếu thẻ này (lỗi, không làm lại). Treatment mỗi tập ghi rõ thời điểm và nội dung thẻ tiêu đề; kiểm tra trên contact sheet trước khi render.
+
 ## 6. Âm thanh (đo từ video)
 
 - Giọng: mức chính, -14 LUFS sau master (mẫu -17.4).
