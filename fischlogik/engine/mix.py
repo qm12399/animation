@@ -63,6 +63,7 @@ def bed(kind, d):
     if kind == 'wind':
         sw = .5 + .5 * np.sin(2 * np.pi * .23 * t_(d) + 1) * np.sin(2 * np.pi * .11 * t_(d))
         return bp(n, 250, 1400) * .05 * (.4 + sw)
+    if kind == 'shop': return lp(hp(n, 200), 1500) * .012
     if kind == 'river': return bp(n, 200, 2600) * .07 * (1 + .25 * np.sin(2 * np.pi * .4 * t_(d))) + lp(n, 160) * .05
     if kind == 'creek': return (bp(n, 1200, 5000) * .03 * (1 + .4 * np.sin(2 * np.pi * 7 * t_(d)) * np.sin(2 * np.pi * 3.1 * t_(d))))
 amb = np.zeros((N, 2))
@@ -90,6 +91,12 @@ for e in ev['ev']:
     elif k == 'gull':
         tt = t_(.5); f = 1500 + 700 * np.exp(-tt * 9); put(fx, np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-tt * 5) * (1 + .5 * np.sin(2 * np.pi * 30 * tt)) * .25, at, .5)
     elif k == 'swirl': put(fx, lp(noise(1.2), 500) * np.sin(np.pi * t_(1.2) / 1.2) ** 2 * .4, at, .6)
+    elif k == 'chug':
+        tt = t_(.35); x = np.sin(2 * np.pi * (180 + 300 * np.exp(-tt * 20)) * tt) * np.exp(-tt * 9) * .5 + bp(noise(.35), 600, 3000) * np.exp(-tt * 12) * .4
+        put(fx, x, at, .7)
+    elif k == 'buzz':
+        d = e.get('d', 1.0); tt = t_(d); x = bp(np.sign(np.sin(2 * np.pi * 95 * tt)) * .3 + noise(d) * .1, 80, 900) * np.minimum(1, tt / .2) * np.minimum(1, (d - tt) / .3)
+        put(fx, x, at, .18)
     elif k == 'tick': put(fx, click(1.4, .5), at, .3)
     elif k == 'ding': put(fx, ding(.5), at, .35)
 
