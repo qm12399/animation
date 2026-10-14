@@ -230,14 +230,14 @@ shot(45.65, 53.45, t => {
   uOnly([uvM.wrap, uvN.wrap]);
   const u = seg(t, 45.65, 53.45), x = 7 + u * 2.6, y = lerp(-1.4, -4.6, ss(seg(t, 49.4, 53.2)));
   uvM.wrap.position.set(x, y + .1, .2); uvM.tail.rotation.x = Math.sin(t * 14) * .6; uvM.wrap.visible = t > 47.7;
-  uvN.wrap.position.set(x - .7, y - .35, .7); uvN.tail.rotation.x = Math.sin(t * 14 + 1) * .6; uvN.wrap.visible = t > 48.6;
+  uvN.wrap.position.set(x - .1, y + .55, .5); uvN.tail.rotation.x = Math.sin(t * 14 + 1) * .6; uvN.wrap.visible = t > 48.6;
   lookFrom(cam, V3(x - .5, y + .1, 3.3), V3(x - .2, y - .1, 0));
   underMode(t, 'murky', { focus: 2.4, aper: 2, bloom: .8 });
 }, t => {
   UI.chapter('2', 'UV-AKTIV', 'trübes Wasser · tiefe Löcher', seg(t, 45.75, 46.15) * (1 - seg(t, 53.1, 53.4)));
   const u = seg(t, 45.65, 53.45), x = 7 + u * 2.6, y = lerp(-1.4, -4.6, ss(seg(t, 49.4, 53.2)));
-  { const s = sp(V3(x, y + .1, .2)); UI.callout('Motoröl', s.x, s.y, 0, -90, seg(t, 47.85, 48.2) * (1 - seg(t, 49.3, 49.5)), { dot: '#8a7a2a' }); }
-  { const s = sp(V3(x - .7, y - .35, .7)); UI.callout('Neongelb', s.x, s.y, 0, 90, seg(t, 48.7, 49.05) * (1 - seg(t, 50.2, 50.4)), { dot: '#e6ff30' }); }
+  { const s = sp(V3(x, y + .1, .2)); UI.callout('Motoröl', s.x, s.y, 0, 80, seg(t, 47.85, 48.2) * (1 - seg(t, 49.3, 49.5)), { dot: '#8a7a2a' }); }
+  { const s = sp(V3(x - .1, y + .55, .5)); UI.callout('Neongelb', s.x, s.y, 0, -80, seg(t, 48.7, 49.05) * (1 - seg(t, 50.2, 50.4)), { dot: '#e6ff30' }); }
   UI.pill('UV-Licht reicht bis zum Grund', W / 2, 230 * S, seg(t, 51.3, 51.65), { dot: '#b48cff' });
   if (t > 51.3) UI.arrow(W - 90 * S, 330 * S, W - 90 * S, 720 * S, seg(t, 51.4, 52.2), 'rgba(190,150,255,.9)', 4);
 });
@@ -260,7 +260,7 @@ shot(56.15, 61.8, t => {
   dockThree[1].body.emissiveIntensity = .25; dockThree[1].tailM.emissiveIntensity = .25;
   dockThree.forEach((d, i) => { const p = DP.clone().add(DIN.clone().multiplyScalar(1.6 + (i - 1) * .45)).setY(DY + .04); d.wrap.position.copy(p); d.wrap.rotation.set(Math.PI / 2, 0, 0); d.wrap.rotateOnWorldAxis(V3(0, 1, 0), Math.atan2(-DIN.z, DIN.x) + Math.PI / 2); });
   const c = DP.clone().add(DIN.clone().multiplyScalar(1.6)).setY(DY);
-  lookFrom(cam, c.clone().add(DIN.clone().multiplyScalar(-lerp(1.6, 2.3, seg(t, 56.15, 58.4)))).add(V3(0, lerp(1.2, 1.6, seg(t, 56.15, 58.4)), 0)), c.clone().add(DIN.clone().multiplyScalar(-.75)));
+  lookFrom(cam, c.clone().add(DIN.clone().multiplyScalar(-lerp(2.2, 2.7, seg(t, 56.15, 58.4)))).add(V3(0, lerp(1.6, 1.9, seg(t, 56.15, 58.4)), 0)), c.clone().add(DIN.clone().multiplyScalar(-.35)));
   lakeMode(t, { refl: true, focus: 1.6, aper: 3, shadow: [c, 4] });
 }, t => {
   ['natürlich', 'UV-aktiv', 'schwarz'].forEach((lb, i) => { const p = DP.clone().add(DIN.clone().multiplyScalar(1.6 + (i - 1) * .45)).setY(DY + .1); const s = sp(p); UI.pill(`${i + 1} · ${lb}`, s.x + 190 * S, s.y, seg(t, 56.3 + i * .15, 56.65 + i * .15) * (1 - seg(t, 58.2, 58.4)), { dot: [C.blue, '#e6ff30', '#111111'][i] }); });
