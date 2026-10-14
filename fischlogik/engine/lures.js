@@ -114,16 +114,17 @@ const BUILD = {
     const h = single(.5); h.position.set(.15, .02, 0); root.add(h);
     return { root, blade: bp };
   },
-  gummifisch() {
-    const root = new THREE.Group(), W = new THREE.Color(0xf0eee6), B = new THREE.Color(0x3a70a8);
-    root.add(mesh(paint(lathe([[-.45, .04], [-.4, .08], [-.15, .14], [.15, .15], [.35, .12], [.45, .06]], 28, .6), (x, up, z, c) => c.copy(W).lerp(B, clamp01(up * 1.4))), soft({ vertexColors: true, roughness: .55 })));
+  gummifisch(o = {}) {
+    const root = new THREE.Group(), W = new THREE.Color(o.belly ?? 0xf0eee6), B = new THREE.Color(o.back ?? 0x3a70a8), tailCol = o.tail ?? o.belly ?? 0xe8e6de;
+    const bm = soft({ vertexColors: true, roughness: o.gloss ? .3 : .55, emissive: new THREE.Color(o.glow ?? 0), emissiveIntensity: o.glowI ?? 0 });
+    root.add(mesh(paint(lathe([[-.45, .04], [-.4, .08], [-.15, .14], [.15, .15], [.35, .12], [.45, .06]], 28, .6), (x, up, z, c) => { c.copy(W).lerp(B, clamp01(up * 1.4)); if (o.bars && up > -.2 && Math.sin(x * 30) > .45) c.multiplyScalar(.45); if (o.glitter && Math.sin(x * 211 + up * 97) * Math.sin(z * 173) > .85) c.setRGB(1, .9, .6); }), bm));
     const tailP = new THREE.Group(); tailP.position.x = -.45; root.add(tailP);
-    const stem = mesh(new THREE.CylinderGeometry(.03, .045, .14, 10).rotateZ(Math.PI / 2), soft({ color: 0xe8e6de })); stem.position.x = -.06; tailP.add(stem);
-    const paddle = mesh(new THREE.CylinderGeometry(.13, .13, .03, 20).rotateZ(Math.PI / 2), soft({ color: 0xe8e6de })); paddle.position.x = -.14; paddle.scale.set(1, 1, .75); tailP.add(paddle);
-    const head = mesh(new THREE.SphereGeometry(.11, 16, 12), M.lead); head.position.x = .5; root.add(head);
+    const tm = soft({ color: tailCol, emissive: new THREE.Color(o.glow ?? 0), emissiveIntensity: o.glowI ?? 0 }); const stem = mesh(new THREE.CylinderGeometry(.03, .045, .14, 10).rotateZ(Math.PI / 2), tm); stem.position.x = -.06; tailP.add(stem);
+    const paddle = mesh(new THREE.CylinderGeometry(.13, .13, .03, 20).rotateZ(Math.PI / 2), tm); paddle.position.x = -.14; paddle.scale.set(1, 1, .75); tailP.add(paddle);
+    const head = mesh(new THREE.SphereGeometry(.11, 16, 12), o.head ? plastic({ color: o.head }) : M.lead); head.position.x = .5; root.add(head);
     eyes(root, .56, .04, .08, .03);
     const h = single(.45); h.position.set(.5, .05, 0); root.add(h);
-    return { root, tail: tailP };
+    return { root, tail: tailP, body: bm, tailM: tm };
   },
   twister() {
     const root = new THREE.Group(), col = 0x8fc43a;
@@ -165,4 +166,4 @@ const BUILD = {
 };
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
 export const LURE_KINDS = Object.keys(BUILD);
-export function makeLure(kind, scale = .35) { const L = BUILD[kind](); const wrap = new THREE.Group(); wrap.add(L.root); wrap.scale.setScalar(scale); L.wrap = wrap; L.kind = kind; return L; }
+export function makeLure(kind, scale = .35, opts) { const L = BUILD[kind](opts); const wrap = new THREE.Group(); wrap.add(L.root); wrap.scale.setScalar(scale); L.wrap = wrap; L.kind = kind; return L; }

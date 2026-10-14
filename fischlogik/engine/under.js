@@ -11,12 +11,16 @@ export const MODES = {
   shallow: { fog: 0x3f5a4c, near: 2, far: 22, shafts: .55, caus: 1 },
   open:    { fog: 0x1d5f57, near: 1, far: 18, shafts: .7, caus: .4 },
   weeds:   { fog: 0x24584b, near: 1, far: 16, shafts: .9, caus: .6 },
+  clear:   { fog: 0x3f7a70, near: 3, far: 30, shafts: 1.1, caus: 1.4, surf: [.16, .36, .33] },
+  deep:    { fog: 0x14303a, near: 1, far: 12, shafts: .15, caus: .08, surf: [.05, .12, .13], light: .55 },
+  murky:   { fog: 0x3a4630, near: .3, far: 6.5, shafts: .5, caus: 0, surf: [.12, .14, .08], shaft: 0xb48cff, light: .6 },
+  night:   { fog: 0x08141c, near: 1, far: 11, shafts: 0, caus: 0, surf: [.07, .11, .15], light: .22 },
 };
 
 export function buildUnder() {
   const scene = new THREE.Scene(), r = rng(99);
   scene.fog = new THREE.Fog(0x1d5f57, 1, 18); scene.background = new THREE.Color(0x1d5f57);
-  scene.add(new THREE.HemisphereLight(0x9fd8cf, 0x1f2a22, 1.6));
+  const hemi = new THREE.HemisphereLight(0x9fd8cf, 0x1f2a22, 1.6); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xe8fff4, 1.6); sun.position.set(-4, 20, 6); scene.add(sun);
 
   // seabed with caustics
@@ -52,10 +56,10 @@ export function buildUnder() {
 
   // surface seen from below
   const surf = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.ShaderMaterial({
-    side: THREE.DoubleSide, fog: false, uniforms: { uTime: TIME },
+    side: THREE.DoubleSide, fog: false, uniforms: { uTime: TIME, uSurf: { value: new THREE.Vector3(.10, .26, .24) }, uGl: { value: 1 } },
     vertexShader: `varying vec2 vP; void main(){ vP = (modelMatrix * vec4(position,1.)).xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
-    fragmentShader: `uniform float uTime; varying vec2 vP; void main(){ float w = sin(vP.x * 1.3 + uTime) * sin(vP.y * 1.1 - uTime * .8) + sin((vP.x + vP.y) * 2.7 + uTime * 1.6) * .4;
-      gl_FragColor = vec4(vec3(.10, .26, .24) + vec3(.06, .09, .08) * pow(max(0., w), 3.), 1.); }` }));
+    fragmentShader: `uniform float uTime; uniform vec3 uSurf; uniform float uGl; varying vec2 vP; void main(){ float w = sin(vP.x * 1.3 + uTime) * sin(vP.y * 1.1 - uTime * .8) + sin((vP.x + vP.y) * 2.7 + uTime * 1.6) * .4;
+      gl_FragColor = vec4(uSurf + vec3(.06, .09, .08) * uGl * pow(max(0., w), 3.), 1.); }` }));
   surf.rotation.x = Math.PI / 2; surf.position.y = 0; scene.add(surf);
 
   // light shafts: additive planes from the surface
@@ -81,6 +85,8 @@ export function buildUnder() {
   function setMode(mode, k = 1) {
     const M = MODES[mode]; scene.fog.color.setHex(M.fog); scene.background.setHex(M.fog); scene.fog.near = M.near; scene.fog.far = M.far;
     shaftM.opacity = .1 * M.shafts; bedM.userData.caus.value = M.caus;
+    const sf = M.surf || [.10, .26, .24]; surf.material.uniforms.uSurf.value.set(...sf); surf.material.uniforms.uGl.value = mode === 'night' ? .3 : 1;
+    shaftM.color.setHex(M.shaft || 0xffffff); hemi.intensity = 1.6 * (M.light ?? 1); sun.intensity = 1.6 * (M.light ?? 1);
   }
   function update(t) {
     const pp = bubG.attributes.position;

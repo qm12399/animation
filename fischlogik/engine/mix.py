@@ -63,6 +63,12 @@ def bed(kind, d):
     if kind == 'wind':
         sw = .5 + .5 * np.sin(2 * np.pi * .23 * t_(d) + 1) * np.sin(2 * np.pi * .11 * t_(d))
         return bp(n, 250, 1400) * .05 * (.4 + sw)
+    if kind == 'night':
+        x = lp(hp(n, 150), 900) * .008; tt = t_(d)
+        for k0 in np.arange(0, d - .3, .9):
+            k = np.arange(int(.25 * SR)) / SR; ch = np.sin(2 * np.pi * 4300 * k) * (np.sin(2 * np.pi * 40 * k) > 0) * np.sin(np.pi * k / .25) * .012
+            i0 = int((k0 + rng.uniform(0, .3)) * SR); x[i0:i0 + len(ch)] += ch
+        return x
     if kind == 'shop': return lp(hp(n, 200), 1500) * .012
     if kind == 'river': return bp(n, 200, 2600) * .07 * (1 + .25 * np.sin(2 * np.pi * .4 * t_(d))) + lp(n, 160) * .05
     if kind == 'creek': return (bp(n, 1200, 5000) * .03 * (1 + .4 * np.sin(2 * np.pi * 7 * t_(d)) * np.sin(2 * np.pi * 3.1 * t_(d))))
@@ -97,6 +103,8 @@ for e in ev['ev']:
     elif k == 'buzz':
         d = e.get('d', 1.0); tt = t_(d); x = bp(np.sign(np.sin(2 * np.pi * 95 * tt)) * .3 + noise(d) * .1, 80, 900) * np.minimum(1, tt / .2) * np.minimum(1, (d - tt) / .3)
         put(fx, x, at, .18)
+    elif k == 'ching':
+        put(fx, click(1.2, .6), at, .4); put(fx, ding(.7), at + .06, .5); put(fx, ding(.5), at + .14, .35)
     elif k == 'tick': put(fx, click(1.4, .5), at, .3)
     elif k == 'ding': put(fx, ding(.5), at, .35)
 

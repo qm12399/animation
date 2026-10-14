@@ -16,11 +16,12 @@ export function fill(color, alpha) { if (alpha <= 0) return; g.save(); g.globalA
 
 // ---------- karaoke ----------
 let CH = [];
-export function setWords(words, keySet, maxWords = 4) {
+export function setWords(words, keySet, maxWords = 3, maxChars = 20) {
   CH = []; let cur = [];
   words.forEach((w, i) => {
     cur.push(w); const nx = words[i + 1], end = /[,.!?:]$/.test(w.w), gap = nx ? nx.t0 - w.t1 : 9;
-    if (end || cur.length >= maxWords || gap > .35 || !nx) { CH.push(cur); cur = []; }
+    const chars = cur.reduce((a, x) => a + x.w.length + 1, 0) + (nx ? nx.w.length : 0);
+    if (end || cur.length >= maxWords || chars > maxChars || gap > .35 || !nx) { CH.push(cur); cur = []; }
   });
   CH = CH.map((ws, i) => ({ ws: ws.map(w => ({ ...w, key: keySet.has(w.w.replace(/[^\wäöüßÄÖÜ]/g, '')) })) }));
   CH.forEach((c, i) => { const nx = CH[i + 1]; c.a = c.ws[0].t0 - .08; c.b = nx ? Math.min(nx.ws[0].t0 - .08, c.ws.at(-1).t1 + 1.2) : c.ws.at(-1).t1 + .8; });
@@ -31,7 +32,7 @@ export function karaoke(t, y = .665) {
   g.save(); g.font = F(800, 41); g.textBaseline = 'middle';
   const sp = g.measureText(' ').width, ws = c.ws.map(w => g.measureText(w.w).width);
   let tot = ws.reduce((a, b) => a + b, 0) + sp * (ws.length - 1), sc = 1;
-  if (tot > W - 60 * S) { sc = (W - 60 * S) / tot; }
+  const maxW = W * .72; if (tot > maxW) { sc = maxW / tot; }
   g.translate(W / 2, H * y); g.scale(sc, sc);
   let x = -tot / 2;
   c.ws.forEach((w, i) => {

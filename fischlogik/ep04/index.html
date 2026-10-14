@@ -1,0 +1,292 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng, std, GLOW } from './engine/core.js';
+import { buildLake, shore, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, castPose } from './engine/angler.js';
+import { makeFish, makeSchool, placeSchool } from './engine/fish.js';
+import { buildUnder, bedHeight } from './engine/under.js';
+import { buildSection, bottomY } from './engine/section.js';
+import { makeLure } from './engine/lures.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['Neunzig', 'Prozent', 'Geld', 'blutroten', 'blutendes', 'Farbe', 'vier', 'Rot', 'graues', 'nachts', 'weiße', 'Fisch', 'oben', 'Nachthimmel', 'unsichtbar', 'schwarzer', 'Schatten', 'drei', 'Farben', 'Natürliche', 'Ukelei', 'Barsch', 'klares', 'UV-aktive', 'Motoröl', 'Neongelb', 'trübes', 'Grund', 'Schwarz', 'Nacht', 'Wasseroberfläche', 'Mehr']));
+
+// ---------------- colour variants of the soft shad ----------------
+const COL = {
+  pink: { back: 0xff3fa0, belly: 0xffa6d4 }, chart: { back: 0x9ccf1a, belly: 0xe2ff6a }, purple: { back: 0x5a2a9a, belly: 0xb08ae6, glitter: true }, orange: { back: 0xe0601a, belly: 0xffb060 },
+  rainbow: { back: 0x2a7ae0, belly: 0xff7ab0 }, pearl: { back: 0xd8dce4, belly: 0xffffff, head: 0xf0f0f0 }, red: { back: 0x9a0c0c, belly: 0xd81e1e, tail: 0xd81e1e, head: 0x7a0a0a },
+  motor: { back: 0x3e3612, belly: 0x6e5e24, tail: 0x5e4e1c, glitter: true, head: 0x3a3418 },
+  neon: { back: 0xc8f010, belly: 0xf4ff60, tail: 0xe6ff30, glow: 0xc8ff00, glowI: .9, head: 0xd8ff20 },
+  ukelei: { back: 0x4f6a78, belly: 0xf2f4f6, tail: 0xdfe6ea, head: 0xb8c2c8 }, barsch: { back: 0x5a6a20, belly: 0xe8d070, bars: true, tail: 0xd2662a, head: 0x5a6a20 },
+  black: { back: 0x060606, belly: 0x101010, tail: 0x0a0a0a, head: 0x080808 },
+};
+const SHOP = ['pink', 'chart', 'purple', 'orange', 'rainbow', 'pearl', 'red', 'motor', 'neon', 'ukelei', 'barsch', 'black'];
+const KEEP = new Set(['ukelei', 'motor', 'black']);
+function shad(c, scale) { const L = makeLure('gummifisch', scale, COL[c]); L.col = c; L.desat = { value: 0 };
+  for (const m of [L.body, L.tailM]) { m.onBeforeCompile = sh => { sh.uniforms.uDesat = L.desat; sh.fragmentShader = 'uniform float uDesat;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(.3,.59,.11))) * .8, uDesat);'); }; }
+  return L; }
+
+// ---------------- worlds ----------------
+const L = buildLake(logo), A = makeAngler(logo); L.scene.add(A.root);
+const U = buildUnder(), X = buildSection();
+const cam = new THREE.PerspectiveCamera(46, W / H, .05, 1200);
+const sp = p => toScreen(cam, p);
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0) { f.position.copy(p); f.rotation.set(0, yaw, pitch); f.material.userData.phase.value = phase; }
+const spot = shore(PLACES.bankTh, 2.4); spot.y = L.terrainHeight(spot.x, spot.z);
+
+// night switch for the lake
+const lights = { hemi: null, sun: null, sky: null };
+L.scene.traverse(o => { if (o.isHemisphereLight) lights.hemi = o; if (o.isDirectionalLight) lights.sun = o; if (o.material && o.material.uniforms && o.material.uniforms.top) lights.sky = o; });
+const DAY = { hemi: lights.hemi.intensity, sun: lights.sun.intensity, top: lights.sky.material.uniforms.top.value.clone(), hor: lights.sky.material.uniforms.hor.value.clone(), fog: L.scene.fog.color.clone() };
+const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: new THREE.Color(2.2, 2.3, 2.4), fog: false, depthWrite: false })); moon.scale.setScalar(30); moon.position.set(-60, 90, -300); L.scene.add(moon);
+function night(on) {
+  lights.hemi.intensity = on ? .34 : DAY.hemi; lights.sun.intensity = on ? .35 : DAY.sun; lights.sun.color.setHex(on ? 0x9ab4ff : 0xfff0da);
+  lights.sky.material.uniforms.top.value.copy(on ? new THREE.Color(0x02050c) : DAY.top); lights.sky.material.uniforms.hor.value.copy(on ? new THREE.Color(0x0a1424) : DAY.hor);
+  L.scene.fog.color.copy(on ? new THREE.Color(0x060c16) : DAY.fog); moon.visible = on;
+}
+// dock frame
+const DP = shore(PLACES.dockTh, 1.0), DIN = shore(PLACES.dockTh, -10).sub(DP).setY(0).normalize(), DSIDE = V3(-DIN.z, 0, DIN.x), DY = .49;
+const dockRed = shad('red', .55); L.scene.add(dockRed.wrap);
+const dockThree = ['ukelei', 'neon', 'black'].map(c => { const s = shad(c, .5); L.scene.add(s.wrap); return s; });
+const whiteLure = shad('pearl', .55); L.scene.add(whiteLure.wrap);
+
+// shop wall
+const SH = new THREE.Scene(); SH.background = new THREE.Color(0x2b2420);
+SH.add(new THREE.HemisphereLight(0xfff0dc, 0x3a3028, 1.4)); { const d = new THREE.DirectionalLight(0xffe6c4, 2.2); d.position.set(2, 4, 5); SH.add(d); }
+{ const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d'); x.fillStyle = '#b48c62'; x.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) { x.fillStyle = '#4a3624'; x.beginPath(); x.arc(16 + i * 32, 16 + j * 32, 4.5, 0, 7); x.fill(); }
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(4, 6);
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(8, 12), new THREE.MeshStandardMaterial({ map: tx, roughness: .9 })); wall.position.z = -.25; SH.add(wall); }
+const shopL = SHOP.map((c, i) => { const s = shad(c, .5); s.home = V3((i % 3 - 1) * .62, 1.25 - Math.floor(i / 3) * .78, 0); s.wrap.position.copy(s.home); s.wrap.rotation.set(0, 0, -Math.PI / 2 + .1 * Math.sin(i)); SH.add(s.wrap); return s; });
+
+// tackle box (top-down)
+const TB = new THREE.Scene(); TB.background = new THREE.Color(0x3a2c22);
+TB.add(new THREE.HemisphereLight(0xfff4e6, 0x403428, 1.5)); { const d = new THREE.DirectionalLight(0xfff0dc, 1.8); d.position.set(2, 6, 3); TB.add(d); }
+{ const table = new THREE.Mesh(new THREE.PlaneGeometry(10, 14).rotateX(-Math.PI / 2), std(0x6a4a30, { roughness: .9 })); table.position.y = -.12; TB.add(table);
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(2.3, .1, 3.9), std(0x2e3a40, { roughness: .5 })); tray.position.y = -.07; TB.add(tray);
+  const wm = std(0x3c4a52, { roughness: .4 }); for (let i = 0; i <= 3; i++) { const w = new THREE.Mesh(new THREE.BoxGeometry(.03, .14, 3.9), wm); w.position.set(-1.15 + i * .767, 0, 0); TB.add(w); } for (let j = 0; j <= 6; j++) { const w = new THREE.Mesh(new THREE.BoxGeometry(2.3, .14, .03), wm); w.position.set(0, 0, -1.95 + j * .65); TB.add(w); } }
+const boxCols = ['pink', 'chart', 'purple', 'orange', 'rainbow', 'pearl', 'red', 'motor', 'neon', 'ukelei', 'barsch', 'black', 'pink', 'orange', 'chart', 'purple', 'red', 'rainbow'];
+const boxL = boxCols.map((c, i) => { const s = shad(c, .55); s.home = V3(-.767 + (i % 3) * .767, .06, -1.625 + Math.floor(i / 3) * .65); s.wrap.position.copy(s.home); s.wrap.rotation.set(Math.PI / 2, 0, (i % 2 ? .1 : -.1)); TB.add(s.wrap); return s; });
+const keepIdx = [9, 7, 11];
+
+// underwater actors
+const redSec = shad('red', 1.6); X.scene.add(redSec.wrap);
+const greyBed = shad('red', .55); greyBed.desat.value = 1; U.scene.add(greyBed.wrap);
+const zander = makeFish('zander', 1.0, { amp: .03, freq: 4 }); U.scene.add(zander);
+const nightWhite = shad('pearl', .55), nightBlack = shad('black', .55); U.scene.add(nightWhite.wrap, nightBlack.wrap);
+for (const m of [nightWhite.body, nightWhite.tailM]) { m.vertexColors = false; m.color.setRGB(0, 0, 0); m.emissive.setRGB(.11, .165, .21); m.emissiveIntensity = 1; m.needsUpdate = true; }
+const natU = shad('ukelei', .55), natB = shad('barsch', .55), uvM = shad('motor', .55), uvN = shad('neon', .55); U.scene.add(natU.wrap, natB.wrap, uvM.wrap, uvN.wrap);
+const ukList = []; { const r = rng(12); for (let i = 0; i < 30; i++) ukList.push({ p: V3((r() - .5) * 3, (r() - .5) * .7, (r() - .5) * 2), yaw: (r() - .5) * .4, s: .8 + r() * .4, phase: r() * 6 }); }
+const school = makeSchool('ukelei', .26, ukList); U.scene.add(school);
+const popB = makeLure('popper', .6); popB.root.traverse(o => { if (o.isMesh && o.material !== undefined && !String(o.material.color?.getHexString()).startsWith('30302e')) o.material = std(0x050505, { roughness: .8 }); }); U.scene.add(popB.wrap);
+const UV_ALL = [greyBed.wrap, zander, nightWhite.wrap, nightBlack.wrap, natU.wrap, natB.wrap, uvM.wrap, uvN.wrap, school, popB.wrap];
+UV_ALL.forEach(o => o.frustumCulled = false);
+function uOnly(list) { UV_ALL.forEach(o => o.visible = list.includes(o)); }
+function lakeOnly(list) { [dockRed.wrap, whiteLure.wrap, ...dockThree.map(d => d.wrap)].forEach(o => o.visible = list.includes(o)); }
+
+function lakeMode(t, o = {}) {
+  TIME.value = t; night(!!o.night); L.setReflect(!!o.refl); L.setFog(...(o.fog || [45, 300])); L.shadowFocus(...(o.shadow || [V3(), 70])); L.fishGlow.visible = false;
+  const wu = L.water.material.uniforms; wu.uWind.value = .2; wu.uMap.value = 0; wu.uDead.value = 0;
+  draw(L.scene, cam, { focus: o.focus, aper: o.aper || 0, vig: o.night ? .55 : .34, bloom: o.night ? .7 : .45 });
+}
+function underMode(t, mode, o = {}) { TIME.value = t; U.setMode(mode); U.update(t); U.murk.visible = false; draw(U.scene, cam, { focus: o.focus ?? 2.6, aper: o.aper ?? 3, vig: .5, bloom: o.bloom ?? .5, sat: .95 }); }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+const xMark = (x, y, k) => { if (k <= 0) return; g.save(); g.strokeStyle = C.red; g.lineWidth = 5 * S; g.lineCap = 'round'; g.globalAlpha = clamp(k * 2); const d = 26 * S * eo(k); g.beginPath(); g.moveTo(x - d, y - d); g.lineTo(x + d, y + d); g.moveTo(x + d, y - d); g.lineTo(x - d, y + d); g.stroke(); g.restore(); };
+
+// 1: the colour wall: 90 % catch nothing but your money
+shot(0, 4.95, t => {
+  shopL.forEach((s, i) => { s.desat.value = KEEP.has(s.col) ? 0 : .85 * ss(seg(t, 2.5 + (i % 4) * .05, 2.9 + (i % 4) * .05)); });
+  const P = keys([[0, V3(-.62, 1.25, .55)], [1.9, V3(-.05, .35, 3.3)], [4.95, V3(0, .2, 3.6)]], t, eio);
+  lookFrom(cam, P, keys([[0, V3(-.62, 1.25, 0)], [1.9, V3(0, .1, 0)], [4.95, V3(0, .05, 0)]], t, eio));
+  TIME.value = t; draw(SH, cam, { focus: P.z + .1, aper: lerp(6, 1, seg(t, 0, 1.9)), vig: .45, bloom: .3 });
+}, t => {
+  shopL.forEach((s, i) => { if (KEEP.has(s.col)) return; const p = sp(s.home); xMark(p.x, p.y, seg(t, 2.6 + (i % 5) * .06, 2.9 + (i % 5) * .06)); });
+  UI.bigStat('90 %', 'fangen keine Fische', W / 2, 230 * S, seg(t, 2.45, 2.85) * (1 - seg(t, 3.7, 3.95)));
+  shopL.forEach((s, i) => { const p = sp(s.home.clone().add(V3(.18, .2, 0))); UI.pill(['€ 6,99', '€ 8,49', '€ 5,99', '€ 7,99'][i % 4], p.x, p.y, seg(t, 3.8 + (i % 6) * .05, 4.1 + (i % 6) * .05), { dot: C.gold }); });
+});
+
+// 2: blood-red shad on the dock in the sun (+ title card)
+shot(4.95, 10.2, t => {
+  lakeOnly([dockRed.wrap]); A.root.position.copy(spot); A.apply(POSES.idle, t);
+  const lp = DP.clone().add(DIN.clone().multiplyScalar(1.6)).setY(DY + .04);
+  dockRed.wrap.position.copy(lp); dockRed.wrap.rotation.set(Math.PI / 2, 0, 0); dockRed.wrap.rotateOnWorldAxis(V3(0, 1, 0), Math.atan2(-DSIDE.z, DSIDE.x));
+  const a = lerp(-.5, .5, seg(t, 4.95, 10.2));
+  const P = lp.clone().add(DSIDE.clone().multiplyScalar(Math.sin(a) * 1.5)).add(DIN.clone().multiplyScalar(Math.cos(a) * 1.5)).add(V3(0, .95, 0));
+  lookFrom(cam, P, lp.clone().add(V3(0, .02, 0)));
+  lakeMode(t, { refl: true, focus: P.distanceTo(lp), aper: 6, shadow: [lp, 4] });
+}, t => {
+  UI.title(4, [['Welche ', 0], ['Farbe', 1]], [['sieht der Fisch?', 0]], seg(t, 5.1, 5.6) * (1 - seg(t, 7.6, 7.95)));
+  const lp = DP.clone().add(DIN.clone().multiplyScalar(1.6)).setY(DY + .06), s = sp(lp);
+  UI.callout('blutendes Beutetier?', s.x, s.y, 0, -110, seg(t, 8.9, 9.3), { dot: C.red });
+});
+
+// 3: water swallows colour: the red shad sinks and turns grey
+const sinkY = t => lerp(-.25, -6.4, ss(seg(t, 10.3, 15.3)));
+shot(10.2, 15.5, t => {
+  const y = sinkY(t); redSec.wrap.position.set(.3 * Math.sin(t * .8), y, .9); redSec.wrap.rotation.set(0, -.35, -.15 + .08 * Math.sin(t * 1.3));
+  redSec.desat.value = ss(seg(-y, .8, 4.0));
+  lookFrom(cam, V3(0, -2.9, 12), V3(0, -3.0, 0));
+  TIME.value = t; X.update(t); const u = X.slabM.uniforms; u.uLayers.value = .3; u.uReveal.value = 0; u.uDead.value = 0; X.oxM.opacity = 0;
+  draw(X.scene, cam, { vig: .42, bloom: .35 });
+}, t => {
+  const s0 = sp(V3(-3.2, 0, 0)), s4 = sp(V3(-3.2, -4, 0)), ppm = (s4.y - s0.y) / 4;
+  UI.depthRuler(26 * S, s0.y, ppm, [0, 2, 4, 6], seg(t, 11.9, 12.5), t > 12.44 ? 4 : -1);
+  const cols = [['#e0302a', 4], ['#f08a2a', 7], ['#f2d23a', 12], ['#5ac85a', 20], ['#3a7ae0', 30]];
+  [0, 2, 4, 6].forEach((m, j) => { const y = s0.y + m * ppm; cols.forEach(([c, lim], i) => { const a = clamp(1 - ss(seg(m, lim * .45, lim))) * seg(t, 12.1 + j * .12, 12.5 + j * .12); g.save(); g.globalAlpha = a; g.fillStyle = c; g.beginPath(); g.arc(W - (150 - i * 26) * S, y, 9 * S, 0, 7); g.fill(); g.restore(); }); });
+  { const y = s0.y + 4 * ppm; UI.pill('Rot ist weg', W - 98 * S, y + 32 * S, seg(t, 14.1, 14.45), { dot: C.red }); }
+  const s = sp(V3(0, sinkY(t), .9)); UI.pill('Wasser schluckt Farbe', W / 2, 230 * S, seg(t, 10.4, 10.8) * (1 - seg(t, 11.9, 12.2)), { dot: C.blue });
+});
+
+// 4: on the river bed the zander sees a grey piece of rubber
+shot(15.5, 19.2, t => {
+  uOnly([greyBed.wrap, zander]); const bx = -2.0, bz = 3.0;
+  greyBed.wrap.position.set(bx, bedHeight(bx, bz) + .08, bz); greyBed.wrap.rotation.set(Math.PI / 2 * .9, 0, 0);
+  const zp = V3(bx - 1.6, bedHeight(bx - 1.6, bz + .3) + .42, bz + .3); fishAt(zander, zp, -.15, 0, 0);
+  const u = seg(t, 15.5, 19.2);
+  lookFrom(cam, zp.clone().add(V3(lerp(-1.2, -.9, u), .95, lerp(1.6, 1.3, u))), V3(bx - .4, bedHeight(bx, bz) + .1, bz));
+  underMode(t, 'deep', { focus: lerp(2.3, 1.9, u), aper: 3 });
+}, t => {
+  const s = sp(V3(-2.0, bedHeight(-2, 3) + .15, 3.0)); UI.callout('graues Stück Gummi', s.x, s.y, 0, -100, seg(t, 17.9, 18.25), { dot: '#9a9a9a' });
+});
+
+// 5: night: everyone throws white lures
+const NT = shore(PLACES.bankTh - .02, -12).setY(.05);
+shot(19.2, 25.1, t => {
+  lakeOnly([]); A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(castPose(t - 21.75), t);
+  const u = seg(t, 19.2, 25.1);
+  lookFrom(cam, spot.clone().add(V3(lerp(.7, .55, u), 1.9, lerp(4.6, 4.0, u))), spot.clone().add(V3(.4, 2.2, -10)));
+  lakeMode(t, { night: true, refl: true, focus: 4.5, aper: 3, shadow: [spot, 14] });
+}, t => {
+  UI.pill('Denkfehler 2: nachts', W / 2, 230 * S, seg(t, 19.4, 19.8) * (1 - seg(t, 21.4, 21.7)), { dot: C.blue });
+  const kc = seg(t, 22.35, 23.1); if (kc > 0) { A.apply(castPose(.62)); const tip = A.tipWorld(); A.apply(castPose(t - 21.75)); UI.dots(cam, UI.arcPts(tip, NT, 4, 34), kc, { r: 2.6, glow: true }); }
+  UI.pill('helle oder weiße Köder', W / 2, 230 * S, seg(t, 23.15, 23.5), { dot: '#ffffff' });
+});
+
+// 6+7: the fish looks up at the night sky: white disappears, black throws a hard shadow
+const crossX = (t, a, b) => lerp(9.6, 14.6, seg(t, a, b));
+shot(25.1, 36.2, t => {
+  const white = t < 32.5;
+  uOnly([zander, white ? nightWhite.wrap : nightBlack.wrap]);
+  const lure = white ? nightWhite : nightBlack, x = white ? crossX(t, 29.6, 32.5) : crossX(t, 32.7, 35.9);
+  lure.wrap.position.set(x, -.35, -1.1); lure.wrap.rotation.set(0, 0, 0); lure.tail.rotation.x = Math.sin(t * 14) * .6;
+  fishAt(zander, V3(11.4, -3.0, .8), .1, .55, 0);
+  const u = seg(t, 25.1, 27.6);
+  lookFrom(cam, V3(10.6, lerp(-2.5, -3.5, u), lerp(2.4, 2.6, u)), V3(12.2, lerp(-1.8, -.2, u), -1.2));
+  underMode(t, 'night', { focus: 3.4, aper: 1.5, bloom: .6 });
+}, t => {
+  const surf = sp(V3(12.2, -.05, -1.5));
+  UI.callout('Nachthimmel', surf.x, surf.y, 60, -40, seg(t, 29.1, 29.45) * (1 - seg(t, 30.9, 31.2)), { dot: '#cfe0ff' });
+  if (t < 32.5) { const s = sp(V3(crossX(t, 29.6, 32.5), -.35, -1.1)); UI.callout('unsichtbar', s.x, s.y, 0, 90, seg(t, 31.7, 32.05) * (1 - seg(t, 32.3, 32.5)), { dot: '#ffffff' }); }
+  else { const s = sp(V3(crossX(t, 32.7, 35.9), -.35, -1.1)); UI.callout('härtester Schatten', s.x, s.y, 0, 90, seg(t, 34.9, 35.25), { dot: '#111111' }); }
+  UI.pill('Restlicht', W / 2, 230 * S, seg(t, 31.2, 31.5) * (1 - seg(t, 32.3, 32.5)), { dot: '#cfe0ff' });
+});
+
+// 8: the tackle box: only three colours stay
+const KEEP_TO = [V3(0, .1, -1.0), V3(0, .1, 0), V3(0, .1, 1.0)];
+shot(36.2, 40.2, t => {
+  boxL.forEach((s, i) => { const ki = keepIdx.indexOf(i); if (ki < 0) { const k = ss(seg(t, 38.2 + (i % 6) * .05, 38.7 + (i % 6) * .05)); s.wrap.scale.setScalar(.55 * (1 - k) + .0001); }
+    else { const k = eio(seg(t, 38.4, 39.3)); s.wrap.position.copy(s.home.clone().lerp(KEEP_TO[ki], k)).setY(.06 + k * .25); s.wrap.scale.setScalar(.55 * (1 + .35 * k)); s.wrap.rotation.set(Math.PI / 2, 0, lerp(i % 2 ? .1 : -.1, 0, k)); } });
+  lookFrom(cam, keys([[36.2, V3(0, 4.8, .3)], [40.2, V3(0, 4.2, .2)]], t, eio), V3(0, 0, 0), V3(0, 0, -1));
+  TIME.value = t; draw(TB, cam, { vig: .45, bloom: .3 });
+}, t => {
+  UI.pill('überfüllte Tacklebox', W / 2, 230 * S, seg(t, 36.6, 37.0) * (1 - seg(t, 38.0, 38.3)), { dot: C.red });
+  keepIdx.forEach((i, ki) => { const s = sp(KEEP_TO[ki].clone().add(V3(.62, .1, 0))); UI.pill(String(ki + 1), s.x, s.y, seg(t, 39.3 + ki * .1, 39.6 + ki * .1), { dot: C.gold }); });
+  UI.pill('nur 3 Farben', W / 2, 230 * S, seg(t, 39.25, 39.6), { dot: C.gold });
+});
+
+// 9: natural patterns in clear, sunny water
+shot(40.2, 45.65, t => {
+  uOnly([natU.wrap, natB.wrap, school]);
+  const u = seg(t, 40.2, 45.65), x = 7 + u * 2.4;
+  natU.wrap.position.set(x, -1.5 + .05 * Math.sin(t * 2), .2); natU.tail.rotation.x = Math.sin(t * 14) * .6;
+  natB.wrap.position.set(x - .6 + seg(t, 42.9, 45.6) * .4, -2.05 + .05 * Math.sin(t * 2 + 1), .6); natB.tail.rotation.x = Math.sin(t * 14 + 1) * .6; natB.wrap.visible = t > 42.9;
+  placeSchool(school, V3(x + .3, -1.2, -1.3), 0);
+  lookFrom(cam, V3(x - .4, -1.55, 2.7), V3(x + .1, -1.6, 0));
+  underMode(t, 'clear', { focus: 2.6, aper: 2.5 });
+}, t => {
+  UI.chapter('1', 'NATÜRLICH', 'klares Wasser · Sonne', seg(t, 40.3, 40.7) * (1 - seg(t, 45.3, 45.6)));
+  const x = 7 + seg(t, 40.2, 45.65) * 2.4;
+  { const s = sp(V3(x, -1.5, .2)); UI.callout('Ukelei-Muster', s.x, s.y, 0, -90, seg(t, 42.3, 42.65) * (1 - seg(t, 43.0, 43.2)), { dot: C.blue }); }
+  { const s = sp(V3(x - .6 + seg(t, 42.9, 45.6) * .4, -2.05, .6)); UI.callout('Barsch-Muster', s.x, s.y, 0, 90, seg(t, 43.05, 43.4), { dot: C.gold }); }
+});
+
+// 10: UV colours in murky water and deep holes
+shot(45.65, 53.45, t => {
+  uOnly([uvM.wrap, uvN.wrap]);
+  const u = seg(t, 45.65, 53.45), x = 7 + u * 2.6, y = lerp(-1.4, -4.6, ss(seg(t, 49.4, 53.2)));
+  uvM.wrap.position.set(x, y + .1, .2); uvM.tail.rotation.x = Math.sin(t * 14) * .6; uvM.wrap.visible = t > 47.7;
+  uvN.wrap.position.set(x - .7, y - .35, .7); uvN.tail.rotation.x = Math.sin(t * 14 + 1) * .6; uvN.wrap.visible = t > 48.6;
+  lookFrom(cam, V3(x - .5, y + .1, 3.3), V3(x - .2, y - .1, 0));
+  underMode(t, 'murky', { focus: 2.4, aper: 2, bloom: .8 });
+}, t => {
+  UI.chapter('2', 'UV-AKTIV', 'trübes Wasser · tiefe Löcher', seg(t, 45.75, 46.15) * (1 - seg(t, 53.1, 53.4)));
+  const u = seg(t, 45.65, 53.45), x = 7 + u * 2.6, y = lerp(-1.4, -4.6, ss(seg(t, 49.4, 53.2)));
+  { const s = sp(V3(x, y + .1, .2)); UI.callout('Motoröl', s.x, s.y, 0, -90, seg(t, 47.85, 48.2) * (1 - seg(t, 49.3, 49.5)), { dot: '#8a7a2a' }); }
+  { const s = sp(V3(x - .7, y - .35, .7)); UI.callout('Neongelb', s.x, s.y, 0, 90, seg(t, 48.7, 49.05) * (1 - seg(t, 50.2, 50.4)), { dot: '#e6ff30' }); }
+  UI.pill('UV-Licht reicht bis zum Grund', W / 2, 230 * S, seg(t, 51.3, 51.65), { dot: '#b48cff' });
+  if (t > 51.3) UI.arrow(W - 90 * S, 330 * S, W - 90 * S, 720 * S, seg(t, 51.4, 52.2), 'rgba(190,150,255,.9)', 4);
+});
+
+// 11: black for night and topwater: the popper silhouette from below
+shot(53.45, 56.15, t => {
+  uOnly([popB.wrap, zander]); const x = lerp(10.4, 13.2, seg(t, 53.45, 56.15));
+  popB.wrap.position.set(x, -.05, -1.1); popB.wrap.rotation.set(0, 0, -.1);
+  fishAt(zander, V3(11.4, -3.0, .8), .15, .55, 0);
+  lookFrom(cam, V3(10.6, -3.5, 2.6), V3(12.2, -.2, -1.2));
+  underMode(t, 'night', { focus: 3.4, aper: 1.5, bloom: .6 });
+}, t => {
+  UI.chapter('3', 'SCHWARZ', 'Nacht · Oberfläche', seg(t, 53.55, 53.95) * (1 - seg(t, 55.85, 56.1)));
+  const s = sp(V3(lerp(10.4, 13.2, seg(t, 53.45, 56.15)), -.05, -1.1)); UI.callout('klare Silhouette', s.x, s.y, 0, 90, seg(t, 54.8, 55.15), { dot: '#111111' });
+});
+
+// 12: the three you need, on the dock
+shot(56.15, 61.8, t => {
+  lakeOnly(dockThree.map(d => d.wrap)); A.root.position.copy(spot); A.apply(POSES.idle, t);
+  dockThree[1].body.emissiveIntensity = .25; dockThree[1].tailM.emissiveIntensity = .25;
+  dockThree.forEach((d, i) => { const p = DP.clone().add(DIN.clone().multiplyScalar(1.6 + (i - 1) * .45)).setY(DY + .04); d.wrap.position.copy(p); d.wrap.rotation.set(Math.PI / 2, 0, 0); d.wrap.rotateOnWorldAxis(V3(0, 1, 0), Math.atan2(-DIN.z, DIN.x) + Math.PI / 2); });
+  const c = DP.clone().add(DIN.clone().multiplyScalar(1.6)).setY(DY);
+  lookFrom(cam, c.clone().add(DIN.clone().multiplyScalar(-lerp(1.6, 2.3, seg(t, 56.15, 58.4)))).add(V3(0, lerp(1.2, 1.6, seg(t, 56.15, 58.4)), 0)), c.clone().add(DIN.clone().multiplyScalar(-.75)));
+  lakeMode(t, { refl: true, focus: 1.6, aper: 3, shadow: [c, 4] });
+}, t => {
+  ['natürlich', 'UV-aktiv', 'schwarz'].forEach((lb, i) => { const p = DP.clone().add(DIN.clone().multiplyScalar(1.6 + (i - 1) * .45)).setY(DY + .1); const s = sp(p); UI.pill(`${i + 1} · ${lb}`, s.x + 190 * S, s.y, seg(t, 56.3 + i * .15, 56.65 + i * .15) * (1 - seg(t, 58.2, 58.4)), { dot: [C.blue, '#e6ff30', '#111111'][i] }); });
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 4.95: .35, 10.2: .4, 15.5: .4, 19.2: .45, 25.1: .45, 36.2: .4, 40.2: .4, 45.65: .4, 53.45: .4, 56.15: .4 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 61.8;
+window.render = t => { t += OFF;
+  UI.clear();
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 58.4, 4, [['Drei Farben.', 0]], [['Mehr nicht.', 1]], logo);
+};
+window.EV = [
+  ...[2.6, 2.7, 2.8, 2.9].map(t => ({ t, type: 'tick' })), { t: 3.85, type: 'ching' }, { t: 4.95, type: 'whoosh' }, { t: 10.2, type: 'dive' }, { t: 15.5, type: 'whoosh' }, { t: 19.2, type: 'whoosh' },
+  { t: 22.35, type: 'swish' }, { t: 23.1, type: 'plop' }, { t: 25.1, type: 'dive' }, { t: 32.6, type: 'whoosh' }, { t: 36.2, type: 'whoosh' }, ...[38.3, 38.45, 38.6].map(t => ({ t, type: 'tick' })), { t: 39.3, type: 'ding' },
+  { t: 40.2, type: 'dive' }, { t: 45.65, type: 'whoosh' }, { t: 51.4, type: 'swirl' }, { t: 53.45, type: 'whoosh' }, { t: 56.15, type: 'whoosh' }, { t: 58.4, type: 'whoosh' }, { t: 59.0, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>

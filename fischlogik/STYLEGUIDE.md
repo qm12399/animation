@@ -33,7 +33,7 @@ Mọi số đo dưới đây tính trên khung 720x1280. Engine của kênh ph�
 
 **Phụ đề karaoke** (quan trọng nhất)
 - Font: sans hình học rất đậm (gần Google Sans Bold). Dùng **Plus Jakarta Sans ExtraBold**.
-- Cỡ ~42 px, căn giữa, tâm dòng ở **y = 0.665 H** (~850 px). Luôn 1 dòng, 1-5 từ / cụm, ngắt theo nhịp nói.
+- Cỡ ~42 px, căn giữa, tâm dòng ở **y = 0.665 H** (~850 px). Luôn 1 dòng, **tối đa 3 từ và ~20 ký tự / cụm**, bề rộng tối đa 72 % khung (từ dài thì thu nhỏ cả dòng). Ngắt theo nhịp nói. (Phản hồi sau Folge 3: cụm 4 từ tràn sát mép.)
 - Từ chưa đọc: trắng ~55 % alpha. Từ đang/đã đọc: trắng 100 %. Từ khoá: `#fbc464`.
 - Bóng mờ mềm (blur ~12 px, đen 50 %), không viền.
 - Cụm đổi ngay khi câu sang cụm mới, không fade dài.
