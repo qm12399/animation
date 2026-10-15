@@ -105,6 +105,11 @@ for e in ev['ev']:
         put(fx, x, at, .18)
     elif k == 'ching':
         put(fx, click(1.2, .6), at, .4); put(fx, ding(.7), at + .06, .5); put(fx, ding(.5), at + .14, .35)
+    elif k == 'reel':
+        d = e.get('d', 1.0); tt = t_(d); clicks = (np.sin(2 * np.pi * 38 * tt) > .7).astype(float)
+        put(fx, (bp(noise(d), 1500, 6000) * .25 * clicks + bp(noise(d), 300, 1200) * .08) * np.minimum(1, tt / .05) * np.minimum(1, (d - tt) / .08), at, .5, .2)
+    elif k == 'strike':
+        put(fx, whoosh(.25, .8), at - .1, .45); put(fx, lp(noise(.3), 900) * np.exp(-t_(.3) * 14), at + .05, .7); put(fx, thump(.5, 90), at + .05, .4)
     elif k == 'tick': put(fx, click(1.4, .5), at, .3)
     elif k == 'ding': put(fx, ding(.5), at, .35)
 

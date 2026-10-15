@@ -22,6 +22,7 @@ export const POSES = {
   stompUp:  { pelvis: .97, lean: .02, handR: V3(.32, 1.0, -.15), handL: V3(-.32, 1.0, -.1), rod: V3(.3, .9, -.4), footR: V3(.16, .42, -.28), footL: V3(-.14, .06, .0), head: 0 },
   stompDn:  { pelvis: .90, lean: .1, handR: V3(.34, 1.05, -.1), handL: V3(-.34, 1.05, -.05), rod: V3(.3, .9, -.4), footR: V3(.16, .06, -.3), footL: V3(-.14, .06, .0), head: 0 },
   walkA:    { pelvis: .96, lean: .05, handR: V3(.28, .95, .1), handL: V3(-.28, .95, -.12), rod: V3(.3, .9, -.4), footR: V3(.14, .1, -.25), footL: V3(-.14, .06, .2), head: 0 },
+  hold:     { pelvis: .95, lean: .06, handR: V3(.24, 1.08, -.38), handL: V3(.04, 1.02, -.34), rod: V3(.04, .32, -1), footR: V3(.14, .06, .02), footL: V3(-.14, .06, -.06), head: 0 },
   walkB:    { pelvis: .96, lean: .05, handR: V3(.28, .95, -.12), handL: V3(-.28, .95, .1), rod: V3(.3, .9, -.4), footR: V3(.14, .06, .2), footL: V3(-.14, .1, -.25), head: 0 },
 };
 export function blendPose(a, b, u) {
@@ -54,6 +55,10 @@ export function makeAngler(logoImg) {
   const blank = new THREE.Mesh(new THREE.CylinderGeometry(.008, .022, L.rod, 8), M.rod); blank.position.y = L.rod / 2 - .35; blank.castShadow = true; rod.add(blank);
   const reel = new THREE.Mesh(new THREE.CylinderGeometry(.045, .045, .05, 14), M.reel); reel.rotation.z = Math.PI / 2; reel.position.set(.05, -.12, 0); rod.add(reel);
   const tip = new THREE.Object3D(); tip.position.y = L.rod - .35; rod.add(tip);
+  // reel crank: arm + knob, spins around the reel axis (local x of the rod)
+  const crank = new THREE.Group(); crank.position.set(.05, -.12, .045); rod.add(crank);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(.012, .085, .012), M.reel); arm.position.y = .04; crank.add(arm);
+  const knob = new THREE.Mesh(new THREE.CylinderGeometry(.014, .014, .04, 10), std(0x222222)); knob.rotation.x = Math.PI / 2; knob.position.set(0, .08, .02); crank.add(knob);
 
   function apply(P, t = 0) {
     const pel = V3(0, P.pelvis, 0), lean = P.lean, breathe = .006 * Math.sin(t * 2.2);
@@ -76,7 +81,7 @@ export function makeAngler(logoImg) {
     root.updateMatrixWorld(true);
   }
   const tipWorld = () => tip.getWorldPosition(new THREE.Vector3());
-  return { root, apply, tipWorld, head, rod };
+  return { root, apply, tipWorld, head, rod, crank };
 }
 
 // a full cast as keyframes: wind-up, whip, follow-through. Returns pose at time u (seconds since start)

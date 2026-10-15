@@ -1,0 +1,293 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng } from './engine/core.js';
+import { buildLake, shore, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, blendPose } from './engine/angler.js';
+import { makeFish } from './engine/fish.js';
+import { buildUnder, bedHeight } from './engine/under.js';
+import { makeLure } from './engine/lures.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['stur', 'Achtzig', 'Prozent', 'nichts', 'Hecht', 'Barsch', 'Füße', 'ab', 'Nachläufer', 'geraden', 'konstantem', 'misstrauisch', 'Pausen', 'Zwei', 'Spinnstopp', 'still', 'Blinker', 'taumelt', 'erschöpft', 'Beißreflex', 'Faulenzen', 'Zander', 'ruhig', 'zwei', 'stoppe', 'segelt', 'drei', 'Absinkphase', 'saugt', 'Tock', 'leer', 'fangen']));
+
+// ---------------- worlds ----------------
+const L = buildLake(logo), A = makeAngler(logo); L.scene.add(A.root);
+const U = buildUnder();
+const cam = new THREE.PerspectiveCamera(46, W / H, .03, 1200);
+const sp = p => toScreen(cam, p);
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0, roll = 0) { f.position.copy(p); f.rotation.set(roll, yaw, pitch); f.material.userData.phase.value = phase; }
+const spot = shore(PLACES.bankTh, 2.4); spot.y = L.terrainHeight(spot.x, spot.z);
+const pike = makeFish('hecht', 1.2, { amp: .05, freq: 5 }), zander = makeFish('zander', 1.0, { amp: .04, freq: 5 }), roach = makeFish('rotauge', .32, { amp: .14, freq: 13 });
+const tw = makeLure('twitchbait', .5), bl = makeLure('blinker', .5), gf = makeLure('gummifisch', .5);
+U.scene.add(pike, zander, roach, tw.wrap, bl.wrap, gf.wrap);
+const ALL = [pike, zander, roach, tw.wrap, bl.wrap, gf.wrap]; ALL.forEach(o => o.frustumCulled = false);
+const only = list => ALL.forEach(o => o.visible = list.includes(o));
+
+function lakeMode(t, o = {}) {
+  TIME.value = t; if (!o.reel) {} L.setReflect(!!o.refl); L.setFog(...(o.fog || [45, 300])); L.shadowFocus(...(o.shadow || [V3(), 70])); L.fishGlow.visible = false;
+  const wu = L.water.material.uniforms; wu.uWind.value = .2; wu.uMap.value = 0; wu.uDead.value = 0;
+  draw(L.scene, cam, { focus: o.focus, aper: o.aper || 0, vig: .36, bloom: .45 });
+}
+function underMode(t, mode, o = {}) { TIME.value = t; U.setMode(mode); U.update(t); U.murk.visible = false; draw(U.scene, cam, { focus: o.focus ?? 2.8, aper: o.aper ?? 2.5, vig: .5, bloom: .5, sat: .95 }); }
+// macro reel: a detailed spinning reel on a rod section, placed in front of the camera by the bank
+const REEL = new THREE.Group(); L.scene.add(REEL);
+const RM = { body: new THREE.MeshStandardMaterial({ color: 0x2a2d33, metalness: .6, roughness: .35 }), spool: new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: .8, roughness: .25 }),
+  line: new THREE.MeshStandardMaterial({ color: 0xe8f0d0, roughness: .6 }), cork: new THREE.MeshStandardMaterial({ color: 0x9a7a52, roughness: .9 }), blank: new THREE.MeshStandardMaterial({ color: 0x1d1d1f, roughness: .35 }), gold: new THREE.MeshStandardMaterial({ color: 0xc9a24a, metalness: .8, roughness: .3 }) };
+{ const blank = new THREE.Mesh(new THREE.CylinderGeometry(.012, .016, 1.6, 12).rotateX(Math.PI / 2), RM.blank); blank.position.z = -.4; REEL.add(blank);
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, .22, 14).rotateX(Math.PI / 2), RM.cork); grip.position.z = .12; REEL.add(grip);
+  const foot = new THREE.Mesh(new THREE.BoxGeometry(.012, .06, .03), RM.body); foot.position.set(0, -.04, .02); REEL.add(foot);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(.03, .034, .06, 20), RM.body); body.position.set(0, -.085, .03); REEL.add(body);
+  const rotor = new THREE.Mesh(new THREE.CylinderGeometry(.036, .03, .03, 24).rotateX(Math.PI / 2), RM.body); rotor.position.set(0, -.085, -.01); REEL.add(rotor);
+  const spool = new THREE.Mesh(new THREE.CylinderGeometry(.032, .032, .035, 24).rotateX(Math.PI / 2), RM.line); spool.position.set(0, -.085, -.04); REEL.add(spool);
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(.033, .004, 8, 24), RM.spool); lip.position.set(0, -.085, -.058); REEL.add(lip);
+  const bail = new THREE.Mesh(new THREE.TorusGeometry(.042, .0025, 6, 24, Math.PI), RM.spool); bail.position.set(0, -.085, -.02); bail.rotation.set(0, Math.PI / 2, 0); REEL.add(bail); }
+const crankP = new THREE.Group(); crankP.position.set(.032, -.085, .03); REEL.add(crankP);
+{ const arm = new THREE.Mesh(new THREE.BoxGeometry(.006, .075, .012), RM.gold); arm.position.set(.004, -.035, 0); crankP.add(arm);
+  const knob = new THREE.Mesh(new THREE.CylinderGeometry(.011, .011, .03, 14).rotateZ(Math.PI / 2), RM.blank); knob.position.set(.02, -.07, 0); crankP.add(knob); }
+const reelPos = shore(PLACES.bankTh, .8).setY(1.1);
+REEL.position.copy(reelPos); REEL.rotation.y = .25;
+const reelWorld = () => REEL.localToWorld(V3(0, -.085, .01));
+
+// ---------------- overlay helpers ----------------
+function flash(x, y, k) { if (k <= 0 || k >= 1) return; g.save(); g.globalAlpha = 1 - k; g.strokeStyle = '#fff'; g.lineWidth = 3 * S; g.beginPath(); g.arc(x, y, (20 + k * 90) * S, 0, 7); g.stroke();
+  g.fillStyle = 'rgba(255,250,230,.55)'; g.beginPath(); g.arc(x, y, (30 * (1 - k)) * S, 0, 7); g.fill(); g.restore(); }
+function timer(x, y, k, label) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 5); g.fillStyle = C.pill; g.beginPath(); g.arc(x, y, 34 * S, 0, 7); g.fill();
+  g.strokeStyle = C.gold; g.lineWidth = 5 * S; g.lineCap = 'round'; g.beginPath(); g.arc(x, y, 26 * S, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(k)); g.stroke();
+  g.fillStyle = '#fff'; g.font = `800 ${15 * S}px PJS`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, x, y + 1); g.restore(); }
+function trail(pts, color = 'rgba(255,246,225,.9)', r = 2.6) { g.save(); g.fillStyle = color; pts.forEach(p => { const s = sp(p); g.beginPath(); g.arc(s.x, s.y, r * S, 0, 7); g.fill(); }); g.restore(); }
+function bigWord(text, k, y = 300) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 3) * clamp((1 - k) * 4 + .2); const sc = lerp(1.6, 1, eo(clamp(k * 3))); g.translate(W / 2, y * S); g.scale(sc, sc);
+  g.font = `italic 900 ${78 * S}px PF`; g.textAlign = 'center'; g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 18 * S; g.fillStyle = C.gold; g.fillText(text, 0, 0); g.restore(); }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+function reelShot(t, crankAngle, o = {}) {
+  REEL.visible = true; A.root.position.copy(spot); A.apply(POSES.idle, t);
+  REEL.rotation.set(o.jerk ? -o.jerk : 0, .25, 0); crankP.rotation.x = crankAngle; REEL.updateMatrixWorld(true);
+  const r = reelWorld(), shake = o.shake || 0;
+  lookFrom(cam, r.clone().add(V3(.32 + shake * Math.sin(t * 90) * .01, .05, .23)), r.clone().add(V3(0, .005, -.03)));
+  lakeMode(t, { refl: true, focus: .3, aper: 9, shadow: [reelPos, 3] });
+}
+
+// 1: the reel spins, steady and stubborn
+shot(0, 1.6, t => reelShot(t, -t * 16), t => { UI.pill('stur einkurbeln', W / 2, 250 * S, seg(t, .5, .85), { dot: C.red }); });
+
+// 2: straight, steady retrieve; the pike follows; pause; bite
+const STOP2 = 4.9, BITE2 = 5.3;
+const x2 = t => 6 + .75 * (Math.min(t, STOP2) - 1.6);
+shot(1.6, 6.0, t => {
+  only([tw.wrap, pike]);
+  const lx = x2(t), bitten = t > BITE2 + .12;
+  tw.wrap.visible = !bitten; tw.wrap.position.set(lx, -1.8, 0); tw.wrap.rotation.set(Math.sin(t * 20) * .12 * (t < STOP2 ? 1 : 0), 0, 0);
+  const px = t < BITE2 ? lx - 1.25 + .1 * Math.sin(t * 2) : lerp(lx - 1.2, lx + .2, eo(seg(t, BITE2, BITE2 + .2)));
+  fishAt(pike, V3(px - .3, -1.8, 0), 0, 0, 0); pike.material.userData.amp.value = t > BITE2 && t < BITE2 + .3 ? .2 : .05;
+  lookFrom(cam, V3(lx - .5, -1.65, 3.2), V3(lx - .3, -1.8, 0));
+  underMode(t, 'open', { focus: 3.2 });
+}, t => {
+  const pts = []; for (let u = 1.6; u < Math.min(t, STOP2); u += .2) pts.push(V3(x2(u) - .3, -1.8, 0)); trail(pts);
+  UI.bigStat('80 %', 'aller Bisse', W / 2, 230 * S, seg(t, 2.45, 2.85) * (1 - seg(t, 4.6, 4.85)));
+  const s = sp(V3(x2(t), -1.8, 0));
+  UI.pill('Pause', s.x, s.y - 80 * S, seg(t, STOP2, STOP2 + .15) * (1 - seg(t, 5.8, 6.0)), { dot: C.blue });
+  flash(s.x, s.y, seg(t, BITE2 + .08, BITE2 + .6));
+  UI.pill('Biss!', W / 2, 250 * S, seg(t, BITE2 + .1, BITE2 + .3), { dot: C.gold });
+});
+
+// 3: the follower: pike trails the lure to your feet, then turns away
+const TURN = 10.85;
+const x3 = t => lerp(3.4, -3.2, seg(t, 6.0, 10.9));
+shot(6.0, 12.3, t => {
+  only([tw.wrap, pike]); tw.wrap.visible = true;
+  const lx = x3(t), ly = bedHeight(lx, 0) + .55;
+  tw.wrap.position.set(lx, ly, 0); tw.wrap.rotation.set(Math.sin(t * 20) * .12, Math.PI, 0);
+  const tk = ss(seg(t, TURN, TURN + .9));
+  const pxx = t < TURN ? lx + 1.1 : lerp(lx + 1.1, lx + 1.1 + 2.5, ei(seg(t, TURN + .3, 12.3)));
+  fishAt(pike, V3(pxx + .4, bedHeight(pxx, .2) + .55, .2 - tk * .5), Math.PI * (1 - tk), 0, 0);
+  lookFrom(cam, V3(lerp(1.8, -1.6, seg(t, 6, 10.9)), -.4, 3.4), V3(lerp(1.6, -1.8, seg(t, 6, 10.9)), -.9, 0));
+  underMode(t, 'shallow', { focus: 3.5 });
+}, t => {
+  UI.title(5, [['Die Macht', 0]], [['der ', 0], ['Pause', 1], ['.', 0]], seg(t, 6.1, 6.6) * (1 - seg(t, 8.4, 8.75)));
+  { const s = sp(V3(-3.2, bedHeight(-3.2, 0) + .6, 0)); UI.callout('bis vor die Füße', s.x, s.y, 0, -90, seg(t, 9.7, 10.05) * (1 - seg(t, 11.0, 11.2)), { dot: C.gold }); }
+  UI.pill('…dreht ab', W / 2, 250 * S, seg(t, 11.45, 11.8), { dot: C.red });
+});
+
+// 4: top-down: the follower's path (Nachläufer)
+const fromP = shore(PLACES.bankTh - .02, -11).setY(.1), toP = shore(PLACES.bankTh + .005, -.4).setY(.1);
+shot(12.3, 14.1, t => {
+  REEL.visible = false; A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.hold, t);
+  const c = fromP.clone().lerp(toP, .62);
+  lookFrom(cam, keys([[12.3, c.clone().add(V3(0, 19, 1))], [14.1, c.clone().add(V3(0, 17, 1))]], t, eio), c, V3(0, 0, -1));
+  lakeMode(t, { shadow: [c, 12] });
+}, t => {
+  const lp = []; for (let i = 0; i <= 30; i++) lp.push(fromP.clone().lerp(toP, i / 30)); UI.dots(cam, lp, eo(seg(t, 12.35, 13.1)), { r: 2.4 });
+  const pp = []; for (let i = 0; i <= 30; i++) { const u = i / 30, b = fromP.clone().lerp(toP, u * .82).add(V3(.6, 0, 0)); if (u > .7) { const a = (u - .7) / .3 * Math.PI; b.add(V3(Math.sin(a) * 2.2, 0, (1 - Math.cos(a)) * -1.3)); } pp.push(b); }
+  UI.polyline(cam, pp, seg(t, 12.5, 13.5), 'rgba(242,163,58,.95)', 3, [7, 6]);
+  { const s = sp(pp[24]); UI.callout('Nachläufer', s.x, s.y, 70, 0, seg(t, 13.3, 13.65), { dot: C.orange }); }
+});
+
+// 5: why no bite? the wounded baitfish wobbles, the lure runs dead straight
+const rX = t => 6 + .5 * (t - 14.1) + .25 * Math.sin(t * 3.1) + .12 * Math.sin(t * 7.3), rY = t => -1.0 + .22 * Math.sin(t * 2.3) + .1 * Math.sin(t * 5.7);
+const lX5 = t => 6 + .5 * (t - 14.1);
+shot(14.1, 22.45, t => {
+  only([roach, tw.wrap, pike]); tw.wrap.visible = true;
+  fishAt(roach, V3(rX(t), rY(t), -.3), .35 * Math.sin(t * 3.1), .3 * Math.cos(t * 2.3), 0, .8 * Math.sin(t * 4.1) * Math.sin(t * 1.3));
+  tw.wrap.position.set(lX5(t), -1.95, -.3); tw.wrap.rotation.set(Math.sin(t * 20) * .1, 0, 0);
+  const u = seg(t, 14.1, 22.45);
+  fishAt(pike, V3(lX5(t) - 1.1, -1.8, .9), -.15 + .1 * Math.sin(t * .7), 0, 0); pike.material.userData.amp.value = .03;
+  lookFrom(cam, V3(lX5(t) - .3, -1.7, 3.6), V3(lX5(t) - .2, -1.75, 0));
+  underMode(t, 'open', { focus: 3.6, aper: 2 });
+}, t => {
+  const rp = [], lp = []; for (let u = Math.max(14.1, t - 4); u < t; u += .22) { rp.push(V3(rX(u), rY(u), -.3)); lp.push(V3(lX5(u), -1.95, -.3)); }
+  trail(rp, 'rgba(160,220,255,.85)', 2.2); trail(lp, 'rgba(255,246,225,.9)', 2.4);
+  { const s = sp(V3(rX(t), rY(t), -.3)); UI.callout('verletzter Beutefisch', s.x, s.y, 0, -80, seg(t, 16.0, 16.35) * (1 - seg(t, 18.0, 18.3)), { dot: C.blue }); }
+  { const s = sp(V3(lX5(t), -1.95, -.3)); UI.callout('gerade · konstantes Tempo', s.x, s.y, 0, 70, seg(t, 18.3, 18.65) * (1 - seg(t, 20.2, 20.4)), { dot: C.gold }); }
+  { const s = sp(V3(lX5(t) - .6, -1.65, .9)); UI.callout('misstrauisch ?', s.x, s.y, 0, -90, seg(t, 21.55, 21.9), { dot: C.red }); }
+});
+
+// 6: mid-water: two seconds of full stop; the twitchbait freezes, the pike creeps up
+const STOP6 = 25.2, GO6 = 27.2;
+const x6 = t => 8 + .7 * (Math.min(t, STOP6) - 22.45);
+shot(22.45, 29.0, t => {
+  only([tw.wrap, pike]); tw.wrap.visible = true;
+  const lx = x6(t); tw.wrap.position.set(lx, -1.8, 0); tw.wrap.rotation.set(t < STOP6 ? Math.sin(t * 20) * .12 : 0, 0, 0);
+  const gap = t < STOP6 ? 1.9 : lerp(1.9, .9, ss(seg(t, STOP6, 29)));
+  fishAt(pike, V3(lx - gap - .3, -1.85, .1), 0, 0, 0); pike.material.userData.amp.value = .04;
+  lookFrom(cam, V3(lx - .6, -1.7, 3.2), V3(lx - .45, -1.8, 0));
+  underMode(t, 'open', { focus: 3.2 });
+}, t => {
+  UI.chapter('1', 'MITTELWASSER', 'Spinnstopp', seg(t, 22.55, 22.95) * (1 - seg(t, 28.7, 29.0)));
+  const s = sp(V3(x6(t), -1.8, 0));
+  timer(s.x, s.y - 100 * S, t > STOP6 ? seg(t, STOP6, GO6) : 0, '2 s');
+  UI.callout('steht still', s.x, s.y, 0, 90, seg(t, 28.0, 28.35), { dot: C.blue });
+});
+
+// 7: the spoon flutters helplessly down
+const STOP7 = 29.6;
+const x7 = t => 9 + .6 * (Math.min(t, STOP7) - 29.0) + .25 * ss(seg(t, STOP7, 31.9));
+const y7 = t => -1.3 - 1.3 * ss(seg(t, STOP7, 32.0)) - 1.2 * ss(seg(t, 32, 38.4));
+shot(29.0, 31.9, t => {
+  only([bl.wrap]);
+  bl.wrap.position.set(x7(t), y7(t), 0); bl.spoon.rotation.set(Math.PI / 2 + Math.sin(t * (t < STOP7 ? 8 : 4)) * (t < STOP7 ? .95 : 1.3), 0, Math.sin(t * 2.5) * .4 * (t > STOP7 ? 1 : 0));
+  lookFrom(cam, V3(x7(t) - .3, y7(t) + .2, 2.6), V3(x7(t), y7(t), 0)); underMode(t, 'open', { focus: 2.6 });
+}, t => {
+  const s = sp(V3(x7(t), y7(t), 0));
+  UI.arrow(s.x + 80 * S, s.y - 60 * S, s.x + 80 * S, s.y + 60 * S, seg(t, 30.0, 30.5));
+  UI.pill('taumelt hilflos', W / 2, 250 * S, seg(t, 30.5, 30.85), { dot: C.gold });
+});
+
+// 8: behind the pike: exhausted prey -> bite reflex
+const STRIKE = 36.35;
+shot(31.9, 38.45, t => {
+  only([bl.wrap, pike]); const bx = x7(t), by = y7(t);
+  bl.wrap.visible = t < STRIKE + .25; bl.wrap.position.set(bx, by, 0); bl.spoon.rotation.set(Math.PI / 2 + Math.sin(t * 4) * 1.3, 0, Math.sin(t * 2.5) * .4);
+  const ap = V3(bx - 2.2, by - .15, .9), hit = V3(bx - .45, by, 0);
+  const pp = t < STRIKE ? ap.clone().lerp(hit, .25 * ss(seg(t, 31.9, STRIKE))) : ap.clone().lerp(hit, .25 + .75 * eo(seg(t, STRIKE, STRIKE + .3)));
+  fishAt(pike, pp, Math.atan2(-(hit.z - ap.z), hit.x - ap.x), 0, 0); pike.material.userData.amp.value = t > STRIKE && t < STRIKE + .4 ? .25 : .04;
+  lookFrom(cam, ap.clone().add(V3(-1.4, .55, 2.4)), V3(bx - .6, by + .05, 0));
+  underMode(t, 'open', { focus: 3.6, aper: 2.5 });
+}, t => {
+  { const s = sp(V3(x7(t), y7(t), 0)); UI.callout('erschöpfte Beute', s.x, s.y, 0, -80, seg(t, 34.6, 34.95) * (1 - seg(t, 36.1, 36.3)), { dot: C.gold }); flash(s.x, s.y, seg(t, STRIKE + .2, STRIKE + .8)); }
+  bigWord('Biss!', seg(t, STRIKE + .25, STRIKE + 1.6));
+  UI.pill('Beißreflex', W / 2, 250 * S, seg(t, 37.3, 37.65), { dot: C.red });
+});
+
+// 9: on the bottom: lift-and-drop for zander
+const BX = -2.6, BZ = 3.0;
+shot(38.45, 42.2, t => {
+  only([gf.wrap, zander]); gf.wrap.position.set(BX, bedHeight(BX, BZ) + .1, BZ); gf.wrap.rotation.set(0, 0, -.1); gf.tail.rotation.x = 0;
+  fishAt(zander, V3(BX + 1.6, bedHeight(BX + 1.6, BZ - .5) + .35, BZ - .5), Math.PI * .95, .05, 0); zander.material.userData.amp.value = .02;
+  const u = seg(t, 38.45, 42.2); lookFrom(cam, V3(BX - lerp(.4, .1, u), bedHeight(BX, BZ) + .6, BZ + lerp(3.2, 2.6, u)), V3(BX + .7, bedHeight(BX, BZ) + .2, BZ));
+  underMode(t, 'shallow', { focus: 3 });
+}, t => {
+  UI.chapter('2', 'GRUND', 'Faulenzen auf Zander', seg(t, 38.55, 38.95) * (1 - seg(t, 41.9, 42.2)));
+  const s = sp(V3(BX + 1.6, bedHeight(BX + 1.6, BZ - .5) + .4, BZ - .5)); UI.callout('Zander', s.x, s.y, 0, -80, seg(t, 41.7, 42.0), { dot: C.gold });
+});
+
+// 10: rod still, two turns, stop
+shot(42.2, 45.5, t => reelShot(t, -Math.PI * 4 * ss(seg(t, 43.6, 44.7))), t => {
+  UI.pill('Rute ruhig', W / 2, 250 * S, seg(t, 42.6, 42.95) * (1 - seg(t, 43.5, 43.65)), { dot: C.blue });
+  UI.bigStat('1', 'Kurbelumdrehung', W / 2, 260 * S, seg(t, 43.75, 43.95) * (1 - seg(t, 44.2, 44.3)));
+  UI.bigStat('2', 'Kurbelumdrehungen', W / 2, 260 * S, seg(t, 44.3, 44.5) * (1 - seg(t, 44.9, 45.0)));
+  UI.pill('Stopp', W / 2, 250 * S, seg(t, 45.0, 45.2), { dot: C.red });
+});
+
+// 11+12: the shad lifts and glides down on a tight line; the zander inhales it on the drop
+const hopY = (t, a) => { const lift = ss(seg(t, a, a + .7)), drop = seg(t, a + .7, a + 3.6); return lift * .75 * (1 - drop * drop); };
+const HOPS = [45.6, 50.8];
+const gx = t => BX + HOPS.reduce((s, a) => s + .55 * ss(seg(t, a, a + .7)) + .9 * seg(t, a + .7, a + 3.6), 0);
+const gy = t => bedHeight(gx(t), BZ) + .1 + HOPS.reduce((s, a) => s + hopY(t, a), 0);
+const SUCK = 52.3;
+shot(45.5, 54.6, t => {
+  only([gf.wrap, zander]);
+  gf.wrap.visible = t < SUCK + .15; gf.wrap.position.set(gx(t), gy(t), BZ); gf.tail.rotation.x = Math.sin(t * 16) * .6 * (HOPS.some(a => t > a && t < a + 3.6) ? 1 : 0);
+  gf.wrap.rotation.set(0, 0, HOPS.reduce((s, a) => s + .5 * Math.sin(Math.PI * seg(t, a, a + .7)) - .25 * Math.sin(Math.PI * seg(t, a + .7, a + 3.6)), 0));
+  const zt = V3(gx(SUCK) - .55, gy(SUCK), BZ), zs = V3(BX + 1.6, bedHeight(BX + 1.6, BZ - .5) + .35, BZ - .5);
+  const k = t < 50.8 ? 0 : t < SUCK ? .4 * ss(seg(t, 50.8, SUCK - .15)) : .4 + .6 * eo(seg(t, SUCK - .15, SUCK + .1));
+  fishAt(zander, zs.clone().lerp(zt, k), lerp(Math.PI * .95, Math.atan2(-(zt.z - zs.z), zt.x - zs.x), clamp(k * 2)), 0, 0);
+  const cx = gx(t);
+  lookFrom(cam, V3(cx - .4, bedHeight(cx, BZ) + .75, BZ + 3.0), V3(cx + .2, bedHeight(cx, BZ) + .4, BZ));
+  underMode(t, 'shallow', { focus: 3 });
+}, t => {
+  const pts = []; for (let u = 45.6; u < t && u < SUCK; u += .12) pts.push(V3(gx(u), gy(u), BZ)); trail(pts, 'rgba(255,246,225,.85)', 2.2);
+  if (t < SUCK) { const s = sp(V3(gx(t) + .25, gy(t), BZ)); g.save(); g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 1.3 * S; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(W + 10, s.y - 420 * S); g.stroke(); g.restore(); }
+  UI.pill('hebt ab', W / 2, 250 * S, seg(t, 46.05, 46.35) * (1 - seg(t, 46.8, 46.95)), { dot: C.gold });
+  UI.pill('segelt an straffer Schnur', W / 2, 250 * S, seg(t, 46.95, 47.3) * (1 - seg(t, 49.6, 49.9)), { dot: C.gold });
+  { const s = sp(V3(gx(t), gy(t), BZ)); timer(s.x, s.y - 110 * S, t > 46.3 && t < 49.6 ? seg(t, 46.3, 49.2) : 0, '2–3 s'); }
+  UI.pill('Absinkphase', W / 2, 250 * S, seg(t, 51.5, 51.85) * (1 - seg(t, 54.2, 54.5)), { dot: C.blue });
+  { const s = sp(V3(gx(SUCK), gy(SUCK), BZ)); flash(s.x, s.y, seg(t, SUCK, SUCK + .6)); }
+});
+
+// 13: TOCK in the wrist
+const TOCK = 55.1;
+shot(54.6, 56.65, t => reelShot(t, 0, { jerk: .22 * Math.exp(-Math.max(0, t - TOCK) * 6) * (t > TOCK ? 1 : 0), shake: t > TOCK && t < TOCK + .3 ? 1 : 0 }), t => {
+  const r = sp(reelWorld()); bigWord('Tock!', seg(t, TOCK, TOCK + 1.4), 330);
+  if (t > TOCK) { g.save(); g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 2 * S; for (let i = 0; i < 3; i++) { const u = ((t - TOCK) * 2 + i / 3) % 1; g.globalAlpha = (1 - u) * (1 - seg(t, 56.2, 56.6)); g.beginPath(); g.arc(r.x, r.y, (20 + u * 80) * S, 0, 7); g.stroke(); } g.restore(); }
+});
+
+// 14: straight cranking catches nothing; pauses catch
+shot(56.65, 63.7, t => {
+  only([tw.wrap, pike]); tw.wrap.visible = true;
+  const lx = 8 + .5 * (t - 56.65) - .5 * Math.max(0, Math.min(t, 59.3) - 58.3); tw.wrap.position.set(lx, -1.8, 0);
+  fishAt(pike, V3(lx - 1.8, -1.9, .3), 0, 0, 0);
+  lookFrom(cam, V3(lx - .8, -1.6, 3.8), V3(lx - .6, -1.8, 0)); underMode(t, 'open', { focus: 3.8 });
+}, t => {
+  UI.pill('durchkurbeln = leer', W / 2, 220 * S, seg(t, 56.8, 57.15), { icon: 'x' });
+  UI.pill('Pausen = Fisch', W / 2, 272 * S, seg(t, 58.7, 59.05), { dot: C.green });
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 1.6: .3, 6.0: .35, 12.3: .35, 14.1: .35, 22.45: .4, 29.0: .3, 31.9: .35, 38.45: .4, 42.2: .35, 45.5: .35, 54.6: .25, 56.65: .35 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 63.7;
+window.render = t => { t += OFF;
+  UI.clear();
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 60.2, 5, [['Kurbeln. Stopp.', 0]], [['Biss', 1], ['.', 0]], logo);
+};
+window.EV = [
+  { t: 0, type: 'reel', d: 1.6 }, { t: 1.6, type: 'dive' }, { t: BITE2, type: 'strike' }, { t: 6.0, type: 'whoosh' }, { t: TURN, type: 'dart' }, { t: 12.3, type: 'whoosh' }, { t: 14.1, type: 'dive' },
+  { t: 22.45, type: 'whoosh' }, { t: STOP6, type: 'tick' }, { t: 26.2, type: 'tick' }, { t: GO6, type: 'tick' }, { t: 29.0, type: 'whoosh' }, { t: 31.9, type: 'whoosh' }, { t: STRIKE, type: 'strike' },
+  { t: 38.45, type: 'dive' }, { t: 42.2, type: 'whoosh' }, { t: 43.6, type: 'reel', d: 1.1 }, { t: 45.0, type: 'tick' }, { t: 45.5, type: 'dive' }, { t: SUCK, type: 'strike' }, { t: 54.6, type: 'whoosh' },
+  { t: TOCK, type: 'thud' }, { t: 56.65, type: 'whoosh' }, { t: 60.2, type: 'whoosh' }, { t: 60.8, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>
