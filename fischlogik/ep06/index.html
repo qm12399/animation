@@ -1,0 +1,254 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng, std, GLOW, instances, glowPoints } from './engine/core.js';
+import { buildLake, shore, lakeR, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, castPose } from './engine/angler.js';
+import { makeFish, makeSchool, placeSchool } from './engine/fish.js';
+import { buildUnder, bedHeight } from './engine/under.js';
+import { buildSection, buildBankCut, bottomY } from './engine/section.js';
+import { makeLure } from './engine/lures.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['nachts', 'Gummifisch', 'Flussgrund', 'vorbei', 'Zander', 'tief', 'Boden', 'reflektierende', 'Katze', 'Glasauge', 'Nachtsichtgerät', 'lichtscheu', 'Löcher', 'dunkel', 'leer', 'Ukeleis', 'flache', 'folgen', 'fünfzig', 'Zentimetern', 'zwei', 'Steinpackung', 'Köpfen', 'Box', 'Wobbler', 'parallel', 'langsam', 'Zeitlupe', 'Grund', 'Stiefeln']));
+
+// ---------------- worlds ----------------
+const L = buildLake(logo), A = makeAngler(logo); L.scene.add(A.root);
+const U = buildUnder(), X = buildSection(), B = buildBankCut();
+const A2 = makeAngler(logo); B.scene.add(A2.root);
+const cam = new THREE.PerspectiveCamera(46, W / H, .03, 1200);
+const sp = p => toScreen(cam, p);
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0) { f.position.copy(p); f.rotation.set(0, yaw, pitch); f.material.userData.phase.value = phase; }
+const spot = shore(PLACES.bankTh, 2.4); spot.y = L.terrainHeight(spot.x, spot.z);
+
+// eyeshine: glowing eye pair drawn in the overlay (stays bright at night)
+function eyeshine(f, k = 1, size = 1) { if (k <= 0 || !f.visible) return; f.updateMatrixWorld(true);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (const z of [-.075, .075]) { const s = sp(f.localToWorld(V3(.4, .05, z))); if (!s.on) continue; const r = (6 + 4 * size) * S;
+    const gr = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, r); gr.addColorStop(0, `rgba(255,250,220,${k})`); gr.addColorStop(.35, `rgba(255,214,120,${.8 * k})`); gr.addColorStop(1, 'rgba(255,200,90,0)'); g.fillStyle = gr; g.beginPath(); g.arc(s.x, s.y, r, 0, 7); g.fill(); }
+  g.restore(); }
+
+// lake: night switch + stone packing along the angler's bank
+const lights = { hemi: null, sun: null, sky: null };
+L.scene.traverse(o => { if (o.isHemisphereLight) lights.hemi = o; if (o.isDirectionalLight) lights.sun = o; if (o.material && o.material.uniforms && o.material.uniforms.top) lights.sky = o; });
+const DAY = { hemi: lights.hemi.intensity, sun: lights.sun.intensity, top: lights.sky.material.uniforms.top.value.clone(), hor: lights.sky.material.uniforms.hor.value.clone(), fog: L.scene.fog.color.clone() };
+const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: new THREE.Color(2.2, 2.3, 2.4), fog: false, depthWrite: false })); moon.scale.setScalar(30); moon.position.set(-60, 90, -300); L.scene.add(moon);
+function night(on) { lights.hemi.intensity = on ? .34 : DAY.hemi; lights.sun.intensity = on ? .35 : DAY.sun; lights.sun.color.setHex(on ? 0x9ab4ff : 0xfff0da);
+  lights.sky.material.uniforms.top.value.copy(on ? new THREE.Color(0x02050c) : DAY.top); lights.sky.material.uniforms.hor.value.copy(on ? new THREE.Color(0x0a1424) : DAY.hor);
+  L.scene.fog.color.copy(on ? new THREE.Color(0x060c16) : DAY.fog); moon.visible = on; }
+{ const r = rng(61), st = []; for (let i = 0; i < 420; i++) { const th = PLACES.bankTh + (r() - .5) * .62, p = shore(th, -1.1 + r() * 2.0); p.y = Math.max(-.25, L.terrainHeight(p.x, p.z)) + .05; st.push({ p, r: new THREE.Euler(r() * 3, r() * 3, 0), s: V3(1, .7, 1).multiplyScalar(.18 + r() * .25) }); }
+  const m = instances(new THREE.DodecahedronGeometry(1, 0), std(0x6e6a62, { flatShading: true, roughness: .95 }), st, o => o); m.castShadow = m.receiveShadow = true; L.scene.add(m); }
+// lake map actors: ukelei glow + zander eye pairs
+const R = rng(42), uk = [], zd = [];
+for (let i = 0; i < 40; i++) { const a = R() * 6.3, rr = Math.sqrt(R()) * .5, [ex, ez] = lakeR(a); uk.push({ a: V3(ex * rr, .15, ez * rr), b: shore(PLACES.bankTh + (R() - .5) * .5, -1.2 - R() * 1.6).setY(.15), d: R() * .4 }); }
+for (let i = 0; i < 7; i++) zd.push({ a: V3((R() - .5) * 8, .16, (R() - .5) * 10), b: shore(PLACES.bankTh + (R() - .5) * .45, -2.4 - R() * 1.5).setY(.16), d: R() * .3 });
+const ukPts = glowPoints(uk.map(u => u.a), 1.0, [1.4, 1.8, 2.4]); L.scene.add(ukPts); ukPts.frustumCulled = false;
+
+// underwater: zanders (for close-ups + night shallows), shad, ukelei school, light shafts
+const zan = makeFish('zander', 1.1, { amp: .03, freq: 4 }), zan2 = makeFish('zander', .95, { amp: .03, freq: 4 }), zan3 = makeFish('zander', 1.0, { amp: .03, freq: 4 });
+const gf = makeLure('gummifisch', .5); U.scene.add(zan, zan2, zan3, gf.wrap);
+const UV = [zan, zan2, zan3, gf.wrap]; UV.forEach(o => o.frustumCulled = false); const uOnly = l => UV.forEach(o => o.visible = l.includes(o));
+// section: one zander
+const xz = makeFish('zander', 1.4, { amp: .04, freq: 4 }); X.scene.add(xz);
+// bank cut: stone packing on the slope, zanders in shallow water, moon-like night
+const bz = [makeFish('zander', .9, { amp: .04, freq: 5 }), makeFish('zander', .8, { amp: .04, freq: 5 })]; bz.forEach(f => B.scene.add(f));
+{ const r = rng(9), st = []; for (let i = 0; i < 120; i++) { const u = r(), x = lerp(-.1, 1.25, u), y = lerp(.38, -1.1, Math.pow(u, .9)) + .05; st.push({ p: V3(x, y, -3.5 + r() * 7), r: new THREE.Euler(r() * 3, r() * 3, 0), s: V3(1, .7, 1).multiplyScalar(.14 + r() * .16) }); }
+  B.scene.add(instances(new THREE.DodecahedronGeometry(1, 0), std(0x6a665e, { flatShading: true }), st, o => o)); }
+const bLights = []; B.scene.traverse(o => { if (o.isLight) bLights.push([o, o.intensity]); });
+function bankNight() { bLights.forEach(([o, i]) => o.intensity = i * .28); B.scene.background.setHex(0x060c16); B.scene.fog.color.setHex(0x060c16); }
+// tackle box under a head-lamp
+const TB = new THREE.Scene(); TB.background = new THREE.Color(0x0a0c10);
+TB.add(new THREE.HemisphereLight(0x8090a0, 0x101010, .4)); { const lamp = new THREE.SpotLight(0xfff0d0, 30, 12, .55, .6); lamp.position.set(0, 4, 1); lamp.target.position.set(0, 0, 0); TB.add(lamp, lamp.target); }
+{ const table = new THREE.Mesh(new THREE.PlaneGeometry(10, 14).rotateX(-Math.PI / 2), std(0x3a2a1e)); table.position.y = -.12; TB.add(table);
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(2.3, .1, 2.6), std(0x2e3a40, { roughness: .5 })); tray.position.y = -.07; TB.add(tray);
+  const wm = std(0x3c4a52); for (const x of [-1.15, 0, 1.15]) { const w = new THREE.Mesh(new THREE.BoxGeometry(.03, .14, 2.6), wm); w.position.set(x, 0, 0); TB.add(w); } for (const z of [-1.3, 0, 1.3]) { const w = new THREE.Mesh(new THREE.BoxGeometry(2.3, .14, .03), wm); w.position.set(0, 0, z); TB.add(w); } }
+const tbShad = makeLure('gummifisch', .62, { back: 0x3a70a8, belly: 0xf0eee6 }), tbWob = makeLure('twitchbait', .62);
+tbShad.wrap.position.set(-.1, .07, -.65); tbShad.wrap.rotation.set(Math.PI / 2, 0, 0); tbWob.wrap.position.set(.1, .07, .45); tbWob.wrap.rotation.set(Math.PI / 2, 0, 0); TB.add(tbShad.wrap, tbWob.wrap);
+
+function lakeMode(t, o = {}) { TIME.value = t; night(true); ukPts.visible = !!o.uk; L.setReflect(!!o.refl); L.setFog(...(o.fog || [250, 900])); L.shadowFocus(...(o.shadow || [V3(), 70])); L.fishGlow.visible = false;
+  const wu = L.water.material.uniforms; wu.uWind.value = .15; wu.uMap.value = o.map || 0; wu.uDead.value = 0; draw(L.scene, cam, { focus: o.focus, aper: o.aper || 0, vig: .55, bloom: .7 }); }
+function underMode(t, mode, o = {}) { TIME.value = t; U.setMode(mode); U.update(t); U.murk.visible = false; draw(U.scene, cam, { focus: o.focus ?? 3, aper: o.aper ?? 2.5, vig: .5, bloom: .6, sat: .95 }); }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+const DEEPX = 8.5, DEEPZ = 0;
+const ZS = [V3(-2.6, -.75, .4), V3(-1.6, -.85, -.5), V3(-3.4, -.8, -1.2)];   // zanders hunting on the shallow shelf
+
+// 1: night: the shad bounces on the deep bed; the zanders are up in the shallows
+shot(0, 4.55, t => {
+  uOnly([gf.wrap, zan, zan2, zan3]);
+  const by = bedHeight(DEEPX, DEEPZ), hop = Math.abs(Math.sin(t * Math.PI / .9)) * .35;
+  gf.wrap.position.set(DEEPX + t * .12, by + .1 + hop, DEEPZ); gf.wrap.rotation.set(0, Math.PI, Math.cos(t * Math.PI / .9) * .3); gf.tail.rotation.x = Math.sin(t * 14) * .5;
+  [zan, zan2, zan3].forEach((f, i) => fishAt(f, ZS[i].clone().add(V3(.15 * Math.sin(t + i), 0, 0)), .4 - i * .5, 0, i));
+  const P = keys([[0, V3(DEEPX - .6, by + .5, 2.2)], [1.8, V3(DEEPX - .9, by + .8, 2.8)], [4.55, V3(1.6, -1.2, 5.6)]], t, eio);
+  const at = keys([[0, V3(DEEPX + .1, by + .25, 0)], [1.8, V3(DEEPX, by + .3, 0)], [4.55, V3(-1.6, -1.1, 0)]], t, eio);
+  lookFrom(cam, P, at);
+  underMode(t, 'night', { focus: P.distanceTo(at), aper: 2 });
+}, t => {
+  [zan, zan2, zan3].forEach(f => eyeshine(f, seg(t, 1.9, 2.6)));
+  const by = bedHeight(DEEPX, DEEPZ); { const s = sp(V3(DEEPX + t * .12, by + .2, 0)); UI.callout('Flussgrund', s.x, s.y, 0, -90, seg(t, 1.5, 1.85) * (1 - seg(t, 2.6, 2.9)), { dot: C.blue }); }
+  { const s = sp(V3(-2.2, -.75, 0)); UI.callout('hier jagt er', s.x, s.y, 0, -80, seg(t, 3.6, 4.0), { dot: C.gold }); }
+});
+
+// 2: daytime: the zander hugs the bottom in deep water (+ title card)
+shot(4.55, 7.5, t => {
+  uOnly([zan]); const by = bedHeight(DEEPX, DEEPZ);
+  fishAt(zan, V3(DEEPX, by + .3, DEEPZ), Math.PI * .85 + .05 * Math.sin(t), .02, 0);
+  const u = seg(t, 4.55, 7.5); lookFrom(cam, V3(DEEPX - lerp(1.8, 1.3, u), by + .7, DEEPZ + lerp(2.6, 2.1, u)), V3(DEEPX, by + .3, DEEPZ));
+  underMode(t, 'deep', { focus: 2.8 });
+}, t => {
+  UI.title(6, [['Nachts jagt', 0]], [['der Zander ', 0], ['flach', 1], ['.', 0]], seg(t, 4.7, 5.2) * (1 - seg(t, 7.0, 7.35)));
+  const s = sp(V3(DEEPX, bedHeight(DEEPX, DEEPZ) + .3, DEEPZ)); UI.callout('tief am Boden', s.x, s.y, 0, 90, seg(t, 6.25, 6.6), { dot: C.gold });
+});
+
+// 3: the eye: a reflective layer like a cat's
+shot(7.5, 11.4, t => {
+  uOnly([zan]); const by = bedHeight(DEEPX, DEEPZ); fishAt(zan, V3(DEEPX, by + .3, DEEPZ), Math.PI * .85, .02, 0);
+  zan.updateMatrixWorld(true); const eye = zan.localToWorld(V3(.4, .05, .075));
+  const u = seg(t, 7.5, 11.4); lookFrom(cam, eye.clone().add(V3(lerp(-.2, -.12, u), .04, lerp(.55, .3, u))), eye);
+  underMode(t, 'deep', { focus: lerp(.58, .33, u), aper: 6 });
+}, t => {
+  zan.updateMatrixWorld(true); const s = sp(zan.localToWorld(V3(.4, .05, .075)));
+  const pulse = .5 + .5 * Math.sin(t * 3); g.save(); g.globalCompositeOperation = 'lighter'; const r = 46 * S, gr = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, r); gr.addColorStop(0, `rgba(255,240,190,${.5 + .3 * pulse})`); gr.addColorStop(1, 'rgba(255,220,140,0)'); g.fillStyle = gr; g.beginPath(); g.arc(s.x, s.y, r, 0, 7); g.fill(); g.restore();
+  UI.callout('reflektierende Schicht', s.x, s.y, 0, -110, seg(t, 8.6, 8.95) * (1 - seg(t, 10.5, 10.75)), { dot: C.gold });
+  UI.pill('wie bei einer Katze', W / 2, 250 * S, seg(t, 10.75, 11.1), { dot: C.gold });
+});
+
+// 4+5: night vision at night, light-shy in sunshine
+shot(11.4, 17.7, t => {
+  const day = t > 14.6; uOnly([zan, zan2]);
+  const by = bedHeight(DEEPX, DEEPZ);
+  if (!day) { fishAt(zan, V3(DEEPX - .3, by + .7, DEEPZ), Math.PI * .9, 0, 0); fishAt(zan2, V3(DEEPX + 1.2, by + 1.0, DEEPZ - 1), Math.PI * 1.1, 0, 1); }
+  else { const k = ss(seg(t, 15.6, 17.4)); fishAt(zan, V3(DEEPX - .3 + k * .8, by + .7 - k * .4, DEEPZ - k * .6), Math.PI * .9 + k * 1.6, -.15 * k, 0); zan2.visible = false; }
+  lookFrom(cam, V3(DEEPX - 1.6, by + 1.0, DEEPZ + 2.6), V3(DEEPX, by + .7, DEEPZ));
+  underMode(t, day ? 'clear' : 'night', { focus: 2.8, aper: 2 });
+}, t => {
+  if (t < 14.6) { [zan, zan2].forEach(f => eyeshine(f, 1, 1.4)); UI.fill('#30ff60', .1 * seg(t, 12.6, 13.2)); g.save(); g.globalAlpha = .08 * seg(t, 12.6, 13.2); g.fillStyle = '#000'; for (let y = 0; y < H; y += 4 * S) g.fillRect(0, y, W, 1.5 * S); g.restore();
+    UI.pill('Nachtsichtgerät', W / 2, 250 * S, seg(t, 13.5, 13.85), { dot: C.green }); }
+  else UI.pill('lichtscheu bei Sonne', W / 2, 250 * S, seg(t, 16.05, 16.4), { dot: C.gold });
+});
+
+// 6+7: section: by day down into the deep hole, at night up and out
+shot(17.7, 24.6, t => {
+  const dive = ss(seg(t, 17.9, 20.2)), rise = ss(seg(t, 21.4, 24.3)), y = lerp(lerp(-1.2, -6.2, dive), -.9, rise);
+  xz.position.set(lerp(-1.5, 1.2, dive) - rise * 3.0, y, .9); xz.rotation.set(0, rise > 0 ? Math.PI : 0, lerp(-.5 * Math.sin(Math.PI * dive), .55 * Math.sin(Math.PI * rise), rise > 0 ? 1 : 0));
+  lookFrom(cam, V3(0, -3, 13.5), V3(0, -3.1, 0));
+  TIME.value = t; X.update(t); const u = X.slabM.uniforms; u.uLayers.value = .3; u.uReveal.value = 0; u.uDead.value = 0; X.oxM.opacity = 0;
+  draw(X.scene, cam, { vig: .42, bloom: .35 });
+}, t => {
+  UI.fill('#040a16', .62 * ss(seg(t, 20.8, 22.2)));
+  if (t > 21.0) eyeshine(xz, seg(t, 21.4, 22.0), 1.6);
+  { const s = sp(V3(1.2, -6.2, .9)); UI.callout('tiefe Löcher', s.x, s.y, 0, -90, seg(t, 19.6, 19.95) * (1 - seg(t, 21.0, 21.3)), { dot: C.blue }); }
+  { const s = sp(V3(1.2, -6.4, .9)); UI.callout('plötzlich leer', s.x, s.y, 0, -90, seg(t, 23.9, 24.25), { icon: 'x' }); }
+});
+
+// 8: night map: bleak move into the shallow bank, zanders follow
+shot(24.6, 30.65, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.idle, t);
+  const ku = eio(seg(t, 25.4, 28.6)), pp = ukPts.geometry.attributes.position;
+  uk.forEach((u, i) => { const q = u.a.clone().lerp(u.b, clamp(ku * 1.2 - u.d)); q.x += Math.sin(t * 1.4 + i) * .2; pp.setXYZ(i, q.x, q.y, q.z); }); pp.needsUpdate = true; ukPts.visible = true;
+  lookFrom(cam, keys([[24.6, V3(0, 84, 4)], [30.65, V3(0, 62, 18)]], t, eio), V3(0, 0, keys([[24.6, 2], [30.65, 16]], t, eio)), V3(0, 0, -1));
+  lakeMode(t, { map: .4, uk: true });
+}, t => {
+  const kz = eio(seg(t, 29.2, 30.6)); zd.forEach(z => { const q = z.a.clone().lerp(z.b, clamp(kz * 1.2 - z.d)); const s = sp(q); g.save(); g.globalCompositeOperation = 'lighter'; for (const dx of [-3, 3]) { g.fillStyle = 'rgba(255,210,120,.95)'; g.beginPath(); g.arc(s.x + dx * S, s.y, 2.6 * S, 0, 7); g.fill(); } g.restore(); });
+  { const s = sp(V3(0, .1, 2)); UI.callout('Ukeleis', s.x, s.y, 50, 0, seg(t, 26.0, 26.4) * (1 - seg(t, 27.6, 27.9)), { dot: C.blue }); }
+  { const s = sp(shore(PLACES.bankTh, -1.6).setY(.1)); UI.callout('flaches Ufer', s.x, s.y, 0, -70, seg(t, 28.3, 28.65), { dot: C.gold }); }
+  UI.pill('die Zander folgen', W / 2, 250 * S, seg(t, 29.5, 29.85), { dot: '#ffd278' });
+});
+
+// 9+10: bank cutaway at night: 50 cm deep, 2 m from your feet; a long cast drags the line over their heads
+const FAR = 39.2;
+shot(30.65, 42.05, t => {
+  bankNight(); A2.root.position.set(-.85, .44, 0); A2.root.rotation.y = -Math.PI / 2; A2.apply(t < 37.8 ? POSES.idle : castPose(t - 37.8), t);
+  const flee = ei(seg(t, 40.8, 41.6));
+  fishAt(bz[0], V3(1.55 + flee * 7, -.32, .4), flee > 0 ? 0 : Math.PI * .95, 0, 0); fishAt(bz[1], V3(2.3 + flee * 8, -.36, -.6), flee > 0 ? 0 : Math.PI * 1.05, 0, 1);
+  bz.forEach(f => f.material.userData.amp.value = flee > 0 ? .2 : .04);
+  lookFrom(cam, V3(.8, .45, lerp(9.6, 9.0, seg(t, 30.65, 42.05))), V3(.8, -.15, 0));
+  TIME.value = t; draw(B.scene, cam, { vig: .5, bloom: .6 });
+}, t => {
+  bz.forEach(f => eyeshine(f, 1, 1));
+  const s0 = sp(V3(2.75, 0, 0)), s5 = sp(V3(2.75, -.5, 0));
+  if (t < 37.8) {
+    const kr = seg(t, 32.1, 32.5); g.save(); g.globalAlpha = kr; g.strokeStyle = C.gold; g.lineWidth = 2 * S; g.beginPath(); g.moveTo(s0.x, s0.y); g.lineTo(s5.x, s5.y); g.moveTo(s0.x - 8 * S, s0.y); g.lineTo(s0.x + 8 * S, s0.y); g.moveTo(s5.x - 8 * S, s5.y); g.lineTo(s5.x + 8 * S, s5.y); g.stroke(); g.restore();
+    UI.pill('50 cm', s0.x + 40 * S, (s0.y + s5.y) / 2, kr, { dot: C.gold });
+    const f0 = sp(V3(-.75, .5, 0)), f2 = sp(V3(1.25, .5, 0)), km = seg(t, 34.7, 35.2);
+    UI.arrow(f0.x, f0.y - 30 * S, lerp(f0.x, f2.x, 1), f2.y - 30 * S, km, 'rgba(251,196,100,.95)', 2.5); UI.pill('< 2 m', (f0.x + f2.x) / 2, f0.y - 58 * S, km, { dot: C.gold });
+    { const s = sp(V3(.6, -.4, 0)); UI.callout('Steinpackung', s.x, s.y, -30, 80, seg(t, 36.9, 37.25), { dot: '#a0a0a0' }); }
+  } else {
+    const kc = seg(t, 38.35, FAR); if (kc > 0) { A2.apply(castPose(.62)); const tip = A2.tipWorld(); A2.apply(castPose(t - 37.8), t); const far = V3(14, .0, 0); UI.dots(cam, UI.arcPts(tip, far, 4, 30), kc, { r: 2.4, glow: true }); }
+    if (t > FAR) { const tip = A2.tipWorld(), a = sp(tip), b = sp(V3(lerp(14, 3, seg(t, FAR, 42)), .02, 0)); g.save(); g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1.4 * S; g.beginPath(); g.moveTo(a.x, a.y); g.quadraticCurveTo((a.x + b.x) / 2, Math.max(a.y, b.y) - 10 * S, b.x, b.y); g.stroke(); g.restore(); }
+    UI.pill('Schnur über ihren Köpfen', W / 2, 250 * S, seg(t, 40.6, 40.95), { dot: C.red });
+  }
+});
+
+// 11: the box under the head-lamp: shad out, slim shallow wobbler in
+shot(42.05, 47.25, t => {
+  tbShad.desat = 0; tbShad.wrap.position.y = .07 + .05 * ss(seg(t, 42.3, 42.8)); tbWob.wrap.position.y = .07 + .2 * ss(seg(t, 45.6, 46.3)); tbWob.wrap.scale.setScalar(.62 * (1 + .3 * ss(seg(t, 45.6, 46.3))));
+  lookFrom(cam, keys([[42.05, V3(0, 4.6, .3)], [47.25, V3(0, 4.1, .3)]], t, eio), V3(0, 0, 0), V3(0, 0, -1));
+  TIME.value = t; draw(TB, cam, { vig: .55, bloom: .35 });
+}, t => {
+  { const s = sp(V3(-.1, .1, -.65)); UI.callout('schwerer Gummifisch', s.x, s.y, 0, -90, seg(t, 42.35, 42.7), { icon: 'x' }); }
+  { const s = sp(V3(.1, .25, .45)); UI.callout('schlanker Flachläufer', s.x, s.y, 0, -80, seg(t, 45.75, 46.1), { dot: C.green }); }
+});
+
+// 12: night top-down: cast parallel to the stones, retrieve in slow motion
+const castT = 47.4, PT = shore(PLACES.bankTh + .33, -1.0).setY(.05);
+shot(47.25, 52.35, t => {
+  A.root.position.copy(spot); A.root.rotation.y = Math.atan2(-(PT.x - spot.x), -(PT.z - spot.z)); A.apply(castPose(t - castT), t);
+  const c = spot.clone().lerp(PT, .5); lookFrom(cam, c.clone().add(V3(0, 15, 1.5)), c, V3(0, 0, -1));
+  lakeMode(t, { shadow: [c, 10] });
+}, t => {
+  const kc = seg(t, castT + .6, castT + 1.3); if (kc > 0) { A.apply(castPose(.62)); const tip = A.tipWorld(); A.apply(castPose(t - castT), t); UI.dots(cam, UI.arcPts(tip, PT, 3, 30), kc, { r: 2.4, glow: true }); }
+  const kr = seg(t, 49.0, 52.3), pts = []; for (let i = 0; i <= 40; i++) pts.push(PT.clone().lerp(spot.clone().setY(.05), i / 40 * .55)); if (kr > 0) UI.polyline(cam, pts, kr * .9, 'rgba(255,214,120,.9)', 2.5, [3, 9]);
+  { const s = sp(PT); UI.callout('parallel zur Steinpackung', s.x, s.y, 0, -70, seg(t, 47.5, 47.9) * (1 - seg(t, 49.4, 49.7)), { dot: C.gold }); }
+  UI.pill('fast in Zeitlupe', W / 2, 250 * S, seg(t, 51.1, 51.45), { dot: C.blue });
+});
+
+// 13: low behind the boots at the water's edge: the eyes are right there
+shot(52.35, 59.7, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.hold, t);
+  lookFrom(cam, spot.clone().add(V3(.45, .85, 1.5)), shore(PLACES.bankTh, -1.0).setY(-.25));
+  lakeMode(t, { refl: true, fog: [30, 200], focus: 2.6, aper: 2, shadow: [spot, 6] });
+}, t => {
+  const e = [shore(PLACES.bankTh - .02, -1.5), shore(PLACES.bankTh + .03, -2.1)].map(p => p.setY(.02));
+  e.forEach((p, i) => { const s = sp(p); g.save(); g.globalCompositeOperation = 'lighter'; const k = seg(t, 54.6 + i * .2, 55.2 + i * .2) * (.75 + .25 * Math.sin(t * 2 + i)); for (const dx of [-7, 7]) { const r = 15 * S, gr = g.createRadialGradient(s.x + dx * S, s.y, 0, s.x + dx * S, s.y, r); gr.addColorStop(0, `rgba(255,248,210,${k})`); gr.addColorStop(1, 'rgba(255,200,90,0)'); g.fillStyle = gr; g.beginPath(); g.arc(s.x + dx * S, s.y, r, 0, 7); g.fill(); } g.restore(); });
+  UI.pill('nicht am Grund', W / 2, 230 * S, seg(t, 53.4, 53.75) * (1 - seg(t, 54.6, 54.85)), { icon: 'x' });
+  UI.pill('direkt vor deinen Stiefeln', W / 2, 230 * S, seg(t, 55.55, 55.9), { dot: C.gold });
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 4.55: .4, 7.5: .35, 11.4: .35, 17.7: .45, 24.6: .45, 30.65: .45, 42.05: .4, 47.25: .4, 52.35: .4 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 59.7;
+window.render = t => { t += OFF;
+  UI.clear();
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 56.3, 6, [['Nachts:', 0]], [['flach', 1], [' fischen.', 0]], logo);
+};
+window.EV = [
+  ...[.0, .9, 1.8, 2.7, 3.6].map(t => ({ t: t + .85, type: 'thud' })), { t: 4.55, type: 'whoosh' }, { t: 7.5, type: 'whoosh' }, { t: 8.6, type: 'ding' }, { t: 11.4, type: 'whoosh' }, { t: 14.6, type: 'whoosh' },
+  { t: 17.7, type: 'whoosh' }, { t: 24.6, type: 'whoosh' }, { t: 30.65, type: 'whoosh' }, { t: 38.35, type: 'swish' }, { t: 40.8, type: 'dart' }, { t: 42.05, type: 'whoosh' }, { t: 42.4, type: 'tick' }, { t: 45.8, type: 'ding' },
+  { t: 47.25, type: 'whoosh' }, { t: castT + .6, type: 'swish' }, { t: castT + 1.3, type: 'plop' }, { t: 49.0, type: 'reel', d: 3.2 }, { t: 52.35, type: 'whoosh' }, { t: 56.3, type: 'whoosh' }, { t: 56.9, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>
