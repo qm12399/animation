@@ -1,0 +1,6 @@
+{
+  "voice": "voice/voice.mp3", "voice_at": 0.0,
+  "env": [[0, 9.95, "under"], [9.75, 13.95, "birds"], [13.7, 63.2, "under"]],
+  "silence": [],
+  "music_end": 59.7
+}

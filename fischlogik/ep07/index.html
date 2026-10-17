@@ -1,0 +1,271 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng, glowPoints } from './engine/core.js';
+import { buildLake, shore, lakeR, PLACES } from './engine/lake.js';
+import { makeFish } from './engine/fish.js';
+import { buildUnder } from './engine/under.js';
+import { makeLure } from './engine/lures.js';
+import { makePikeJaw, makeLeader } from './engine/pikejaw.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['unsichtbare', 'größten', 'Fluorocarbon', 'Scheuchwirkung', 'Hechte', 'Hecht', 'Beute', 'siebenhundert', 'Skalpelle', 'schüttelt', 'Klingen', 'reißt', 'Sekunde', 'verlierst', 'Millimeter', 'steif', 'Drahtbügel', 'zerstört', 'Titan', 'Sieben-mal-Sieben-Stahlvorfach', 'dunkler', 'sichtbar', 'weich', 'Hechtzahn', 'Unsichtbarkeit', 'Stahl']));
+
+// ---------------- worlds ----------------
+const L = buildLake(logo); const U = buildUnder();
+const cam = new THREE.PerspectiveCamera(46, W / H, .02, 1200);
+const sp = p => toScreen(cam, p);
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0) { f.position.copy(p); f.rotation.set(0, yaw, pitch); f.material.userData.phase.value = phase; }
+const pike = makeFish('hecht', 1.9, { amp: .05, freq: 5 }), perch = makeFish('barsch', .5), J = makePikeJaw();
+const lure = makeLure('twitchbait', .45), lure2 = makeLure('twitchbait', .45);
+const fluo = makeLeader('fluoro'), thick = makeLeader('thick'), steel = makeLeader('steel');
+const braid = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0x5aa83a, roughness: .7 })); braid.frustumCulled = false;
+const swivel = new THREE.Mesh(new THREE.TorusGeometry(.012, .003, 6, 14), new THREE.MeshStandardMaterial({ color: 0x2a2c2e, metalness: .9, roughness: .3 }));
+U.scene.add(pike, perch, J.root, lure.wrap, lure2.wrap, fluo.mesh, thick.mesh, steel.mesh, braid, swivel);
+const ALL = [pike, perch, J.root, lure.wrap, lure2.wrap, fluo.mesh, thick.mesh, steel.mesh, braid, swivel]; ALL.forEach(o => o.frustumCulled = false);
+const only = l => ALL.forEach(o => o.visible = l.includes(o));
+function tube(mesh, pts, r) { mesh.geometry.dispose(); mesh.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, r, 6, false); }
+const nose = L => L.wrap.localToWorld(V3(.62, 0, 0));
+function underMode(t, mode, o = {}) { TIME.value = t; U.setMode(mode); U.update(t); U.murk.visible = false; draw(U.scene, cam, { focus: o.focus ?? 2.6, aper: o.aper ?? 2.5, vig: .5, bloom: .5, sat: .95 }); }
+
+// ---------------- overlay helpers ----------------
+function thinLine(a, b, alpha = .5, w = 1) { g.save(); g.strokeStyle = `rgba(235,250,255,${alpha})`; g.lineWidth = w * S; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); }
+function glint(x, y, k) { if (k <= 0) return; g.save(); g.globalCompositeOperation = 'lighter'; const r = 12 * S, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(255,255,255,${k})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.restore(); }
+function sparks(x, y, t, k) { if (k <= 0) return; const r = rng(Math.floor(t * 20)); g.save(); g.strokeStyle = 'rgba(255,240,200,.9)'; g.lineWidth = 1.6 * S; g.globalAlpha = k; for (let i = 0; i < 6; i++) { const a = r() * 6.3, l = (6 + r() * 14) * S; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); } g.restore(); }
+function timer(x, y, k, label) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 5); g.fillStyle = C.pill; g.beginPath(); g.arc(x, y, 36 * S, 0, 7); g.fill();
+  g.strokeStyle = C.red; g.lineWidth = 5 * S; g.lineCap = 'round'; g.beginPath(); g.arc(x, y, 28 * S, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(k)); g.stroke();
+  g.fillStyle = '#fff'; g.font = `800 ${14 * S}px PJS`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, x, y + 1); g.restore(); }
+function bigWord(text, k, y = 300, color = C.gold) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 3) * clamp((1 - k) * 4 + .2); const sc = lerp(1.6, 1, eo(clamp(k * 3))); g.translate(W / 2, y * S); g.scale(sc, sc);
+  g.font = `italic 900 ${74 * S}px PF`; g.textAlign = 'center'; g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 18 * S; g.fillStyle = color; g.fillText(text, 0, 0); g.restore(); }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+const MX = 8, MY = -1.8;
+
+// 1: the invisible line snaps
+const BITE = 1.9, SNAP = 2.9;
+const x1 = t => MX + .6 * Math.min(t, BITE);
+shot(0, 4.1, t => {
+  only([lure.wrap, pike]); const lx = x1(t);
+  lure.wrap.position.set(lx, MY, 0); lure.wrap.rotation.set(Math.sin(t * 20) * .12, 0, 0); lure.wrap.visible = t < BITE + .15;
+  const ap = V3(lx - 3.2, MY - .15, .5), hit = V3(lx - 1.05, MY, 0);
+  let pp = t < BITE - .4 ? ap.clone().lerp(hit, .3 * ss(seg(t, 0, BITE - .4))) : ap.clone().lerp(hit, .3 + .7 * eo(seg(t, BITE - .4, BITE)));
+  if (t > SNAP) pp = hit.clone().add(V3(-(t - SNAP) * 1.6, -(t - SNAP) * .3, -(t - SNAP) * .8));
+  const shake = t > 2.3 && t < SNAP ? Math.sin(t * 40) * .3 : 0;
+  fishAt(pike, pp, (t > SNAP ? Math.PI * .85 * ss(seg(t, SNAP, SNAP + .6)) : 0) + shake, 0, 0); pike.material.userData.amp.value = t > BITE - .4 && t < SNAP + .5 ? .14 : .05;
+  const z1 = eio(seg(t, 0, BITE - .3));
+  lookFrom(cam, V3(lerp(lx - .1, lx - .9, z1), MY + .15, lerp(1.5, 3.4, z1)), V3(lerp(lx + .05, lx - .7, z1), MY, 0));
+  underMode(t, 'open', { focus: lerp(1.5, 3.4, z1) });
+}, t => {
+  const lx = x1(t), lurePt = t < BITE ? V3(lx + .28, MY, 0) : V3(x1(BITE) + .28, MY, 0);
+  if (t < SNAP) { const a = sp(lurePt), b = { x: W + 20, y: a.y - 420 * S }; thinLine(a, b, .22 + .2 * Math.sin(t * 7) ** 2, 1); glint(lerp(a.x, b.x, (t * .4) % 1), lerp(a.y, b.y, (t * .4) % 1), .7); }
+  else { const a = sp(V3(x1(BITE) + .5, MY + .1, 0)), up = clamp((t - SNAP) * 3), b = { x: W + 20, y: a.y - 420 * S }; thinLine({ x: lerp(a.x, b.x, up), y: lerp(a.y, b.y, up) }, b, .4, 1.2); sparks(a.x, a.y, t, 1 - seg(t, SNAP, SNAP + .5)); }
+  UI.pill('unsichtbare Schnur', W / 2, 250 * S, seg(t, .35, .7) * (1 - seg(t, 1.6, 1.85)), { dot: '#e0f4f8' });
+  bigWord('Riss!', seg(t, SNAP, SNAP + 1.2), 330, '#ffffff');
+});
+
+// 2: the knot: braid -> thin fluoro -> lure; a perch hesitates (+ title)
+const x2 = t => MX + 2 + .25 * (t - 4.1);
+shot(4.1, 9.85, t => {
+  only([lure2.wrap, fluo.mesh, braid, perch]); const lx = x2(t);
+  lure2.wrap.position.set(lx, MY, 0); lure2.wrap.rotation.set(Math.sin(t * 18) * .1, 0, 0); lure2.wrap.updateMatrixWorld(true);
+  const n = nose(lure2), k = V3(lx + .6, MY + .5, 0);
+  tube(fluo.mesh, [n, n.clone().lerp(k, .5).add(V3(0, .02 * Math.sin(t * 3), 0)), k], .004);
+  tube(braid, [k, k.clone().add(V3(.6, .3, 0)), k.clone().add(V3(1.6, .9, 0))], .006);
+  const hes = Math.sin(Math.PI * seg(t, 7.6, 9.6)); fishAt(perch, V3(lx + .5 + hes * .15, MY - .38, .3), Math.PI + (hes > .3 ? .3 : 0), 0, 0);
+  lookFrom(cam, V3(lx + .3, MY + .25, 3.0), V3(lx + .3, MY + .15, 0));
+  underMode(t, 'open', { focus: 3.0 });
+}, t => {
+  UI.title(7, [['Fluo gegen', 0]], [['Hechtzähne', 1], ['.', 0]], seg(t, 4.3, 4.8) * (1 - seg(t, 6.6, 6.95)));
+  const lx = x2(t);
+  { const s = sp(V3(lx + .45, MY + .25, 0)); UI.callout('Fluorocarbon', s.x, s.y, -110, -40, seg(t, 5.6, 5.95) * (1 - seg(t, 7.4, 7.6)), { dot: '#e0f4f8' }); }
+  { const s = sp(V3(lx + .6, MY + .5, 0)); UI.callout('Knoten', s.x, s.y, -90, -70, seg(t, 4.8, 5.15) * (1 - seg(t, 7.4, 7.6)), { dot: C.green }); }
+  { const s = sp(V3(lx + .5, MY - .38, .3)); UI.callout('Scheuchwirkung?', s.x, s.y, -30, 150, seg(t, 8.0, 8.35), { dot: C.gold }); }
+});
+
+// 3: map: where there are perch, there are pike
+const R = rng(5), perchPts = [], pikePts = [];
+for (const [th, n] of [[.3, 6], [1.3, 6], [2.2, 5], [3.4, 6], [4.4, 7], [5.4, 6]]) for (let i = 0; i < n; i++) perchPts.push(shore(th + (R() - .5) * .25, -1.2 - R() * 3).setY(.15));
+for (const th of [.45, 1.15, 2.35, 3.25, 4.55, 5.25]) pikePts.push(shore(th, -3.4).setY(.16));
+const pg = glowPoints(perchPts, 1.4, [2.2, 1.8, .8]); L.scene.add(pg);
+shot(9.85, 13.8, t => {
+  lookFrom(cam, keys([[9.85, V3(0, 92, 2)], [13.8, V3(0, 84, 2)]], t, eio), V3(0, 0, 0), V3(0, 0, -1));
+  TIME.value = t; L.setReflect(false); L.setFog(250, 900); L.shadowFocus(V3(), 70); L.fishGlow.visible = false; pg.visible = true;
+  draw(L.scene, cam, { vig: .5, bloom: .45 });
+}, t => {
+  const kp = seg(t, 12.3, 12.8); pikePts.forEach((p, i) => { const s = sp(p), k = seg(t, 12.3 + i * .08, 12.7 + i * .08); if (k <= 0) return; g.save(); g.globalAlpha = k; g.fillStyle = C.red; g.beginPath(); g.arc(s.x, s.y, 7 * S * back(k), 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5 * S; g.stroke(); g.restore(); });
+  UI.pill('Barsche', W * .3, 230 * S, seg(t, 11.8, 12.15), { dot: C.gold });
+  UI.pill('Hechte', W * .7, 230 * S, seg(t, 13.0, 13.35), { dot: C.red });
+});
+function back(k) { k = clamp(k) - 1; return 1 + k * k * (2.7 * k + 1.7); }
+
+// 4: the pike focuses on the prey, not the line
+shot(13.8, 17.45, t => {
+  only([lure.wrap, pike]); lure.wrap.visible = true; const lx = MX + 3 + .3 * (t - 13.8);
+  lure.wrap.position.set(lx, MY, 0); lure.wrap.rotation.set(Math.sin(t * 20) * .12, 0, 0);
+  fishAt(pike, V3(lx - 2.0, MY - .05, .15), 0, 0, 0);
+  lookFrom(cam, V3(lx - 3.6, MY + .45, 1.0), V3(lx, MY, 0));
+  underMode(t, 'open', { focus: 3.6, aper: 2.2 });
+}, t => {
+  const lx = MX + 3 + .3 * (t - 13.8), s = sp(V3(lx, MY, 0)), k = seg(t, 16.0, 16.4);
+  const a = sp(V3(lx + .28, MY, 0)); thinLine(a, { x: W + 20, y: a.y - 400 * S }, .25 * (1 - seg(t, 14.7, 15.2)), 1);
+  if (k > 0) { g.save(); g.strokeStyle = C.red; g.lineWidth = 3 * S; g.globalAlpha = k; const d = lerp(90, 46, eo(k)) * S, c = 16 * S; for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { g.beginPath(); g.moveTo(s.x + sx * d, s.y + sy * (d - c)); g.lineTo(s.x + sx * d, s.y + sy * d); g.lineTo(s.x + sx * (d - c), s.y + sy * d); g.stroke(); } g.restore(); }
+  UI.pill('Schnur? egal.', W / 2, 230 * S, seg(t, 14.7, 15.05) * (1 - seg(t, 15.9, 16.1)), { icon: 'x' });
+  UI.pill('fokussiert die Beute', W / 2, 230 * S, seg(t, 16.1, 16.45), { dot: C.red });
+});
+
+// 5: the open mouth: about 700 teeth
+const JP = V3(MX, MY, 0);
+shot(17.45, 21.55, t => {
+  only([J.root]); J.root.position.copy(JP); J.root.rotation.set(0, -.25, 0); J.open(lerp(.15, .62, eo(seg(t, 17.5, 18.4))));
+  const u = seg(t, 17.45, 21.55);
+  lookFrom(cam, JP.clone().add(V3(lerp(.7, .5, u), lerp(.3, .2, u), lerp(3.6, 3.0, u))), JP.clone().add(V3(-.15, -.2, 0)));
+  underMode(t, 'open', { focus: lerp(3.6, 3.0, u), aper: 2.5 });
+}, t => {
+  UI.bigStat('700', 'Zähne', W / 2, 230 * S, seg(t, 18.8, 19.2) * (1 - seg(t, 20.5, 20.75)));
+  UI.pill('scharf wie Skalpelle', W / 2, 230 * S, seg(t, 20.75, 21.1), { dot: C.red });
+});
+
+// 6: bite, head shake: the tight line saws over the blades
+const SHAKE0 = 23.4, SHAKE1 = 24.9;
+shot(21.55, 27.65, t => {
+  only([J.root, lure.wrap]); lure.wrap.visible = true;
+  const shake = t > SHAKE0 && t < SHAKE1 ? Math.sin((t - SHAKE0) * 22) * .32 * Math.sin(Math.PI * seg(t, SHAKE0, SHAKE1)) : 0;
+  J.root.position.copy(JP); J.root.rotation.set(0, -.25 + shake, shake * .3); J.open(lerp(.5, .12, eo(seg(t, 21.8, 22.6))));
+  J.root.updateMatrixWorld(true);
+  lure.wrap.position.copy(J.root.localToWorld(V3(.62, -.02, .05))); lure.wrap.rotation.set(0, -.25 + shake + .3, 0);
+  lookFrom(cam, JP.clone().add(V3(1.9, .45, 1.5)), JP.clone().add(V3(.4, -.05, 0)));
+  underMode(t, 'open', { focus: 2.3, aper: 2.2 });
+}, t => {
+  J.root.updateMatrixWorld(true); const corner = sp(J.root.localToWorld(V3(.35, -.01, .3))), a = sp(lure.wrap.localToWorld(V3(.5, 0, 0)));
+  if (t > 22.2) { thinLine(a, corner, .45, 1.2); thinLine(corner, { x: W + 20, y: corner.y - 380 * S }, .45, 1.2); }
+  sparks(corner.x, corner.y, t, t > 25.1 ? .9 : 0);
+  UI.pill('Kopfschütteln', W / 2, 230 * S, seg(t, 24.25, 24.6) * (1 - seg(t, 25.6, 25.9)), { dot: C.gold });
+  UI.callout('Schnur auf den Klingen', corner.x, corner.y, -40, 90, seg(t, 25.9, 26.3), { dot: C.red });
+});
+
+// 7: slow motion: the fluoro frays and snaps in a split second
+const BREAK = 29.1;
+shot(27.65, 31.65, t => {
+  only([J.root]); J.root.position.copy(JP); J.root.rotation.set(0, -.25, 0); J.open(.18);
+  lookFrom(cam, JP.clone().add(V3(1.0, .15, .75)), JP.clone().add(V3(.55, -.02, .25)));
+  underMode(t, 'open', { focus: 1.25, aper: 4 });
+}, t => {
+  const y = H * .43, mid = W * .5, n = 7;
+  for (let i = 0; i < n; i++) { const tb = BREAK - .25 + i * .07, broken = t > tb, gap = broken ? eo(seg(t, tb, tb + .6)) * 160 * S : 0, dy = (i - n / 2) * 2.2 * S;
+    g.save(); g.strokeStyle = 'rgba(230,248,252,.85)'; g.lineWidth = 1.6 * S; g.beginPath(); g.moveTo(-10, y + dy); g.lineTo(mid - gap * .3, y + dy + (broken ? gap * .2 : 0)); g.moveTo(mid + gap, y + dy - (broken ? gap * .25 : 0)); g.lineTo(W + 10, y + dy - 30 * S); g.stroke(); g.restore(); }
+  sparks(mid, y, t, t > BREAK - .25 && t < BREAK + .4 ? 1 : 0);
+  timer(W / 2, 250 * S, seg(t, BREAK - .3, BREAK + .1), '0,1 s');
+  UI.pill('reißt', W / 2, 330 * S, seg(t, BREAK + .1, BREAK + .4), { dot: C.red });
+});
+
+// 8: the pike swims off with a nailed mouth
+shot(31.65, 35.45, t => {
+  only([pike, lure.wrap]); lure.wrap.visible = true; const u = seg(t, 31.65, 35.45);
+  fishAt(pike, V3(MX + 4 - u * 2.6, MY, -u * 1.0), Math.PI + .25, 0, 0); pike.updateMatrixWorld(true);
+  lure.wrap.position.copy(pike.localToWorld(V3(.5, -.02, .04))); lure.wrap.rotation.set(0, Math.PI + .6, .3);
+  lookFrom(cam, V3(MX + 2.6, MY + .3, 3.4), V3(MX + 2.2, MY, 0));
+  underMode(t, 'open', { focus: 3.6 });
+}, t => {
+  pike.updateMatrixWorld(true); const s = sp(pike.localToWorld(V3(.5, 0, 0)));
+  UI.callout('vernageltes Maul', s.x, s.y, 0, -90, seg(t, 33.7, 34.05), { dot: C.red });
+  UI.pill('Fisch verloren', W / 2, 230 * S, seg(t, 31.8, 32.15), { icon: 'x' });
+});
+
+// 9: thick fluoro would be needed: 1 mm, stiff as a wire hanger, kills the action
+shot(35.45, 44.45, t => {
+  only([lure2.wrap, thick.mesh]); const lx = MX + 1 + .3 * (t - 35.45);
+  lure2.wrap.position.set(lx, MY, 0); lure2.wrap.rotation.set(0, 0, 0); lure2.wrap.updateMatrixWorld(true);
+  const n = nose(lure2); tube(thick.mesh, [n, n.clone().add(V3(.6, .18, 0)), n.clone().add(V3(1.4, .45, 0)), n.clone().add(V3(2.4, .8, 0))], .014);
+  lookFrom(cam, V3(lx + .4, MY + .2, 2.9), V3(lx + .35, MY + .1, 0));
+  underMode(t, 'open', { focus: 2.9 });
+}, t => {
+  const k = seg(t, 37.2, 37.6) * (1 - seg(t, 40.0, 40.3)), y0 = 220 * S;
+  if (k > 0) { g.save(); g.globalAlpha = k; g.fillStyle = C.pill; g.beginPath(); g.roundRect(W / 2 - 170 * S, y0 - 40 * S, 340 * S, 110 * S, 18 * S); g.fill();
+    g.strokeStyle = '#e8f6f8'; g.lineWidth = 1.2 * S; g.beginPath(); g.moveTo(W / 2 - 140 * S, y0); g.lineTo(W / 2 + 40 * S, y0); g.stroke(); g.lineWidth = 5 * S; g.beginPath(); g.moveTo(W / 2 - 140 * S, y0 + 40 * S); g.lineTo(W / 2 + 40 * S, y0 + 40 * S); g.stroke();
+    g.fillStyle = '#fff'; g.font = `700 ${15 * S}px PJS`; g.textBaseline = 'middle'; g.fillText('0,25 mm', W / 2 + 60 * S, y0); g.fillStyle = C.gold; g.fillText('≈ 1 mm', W / 2 + 60 * S, y0 + 40 * S); g.restore(); }
+  UI.pill('steif wie ein Drahtbügel', W / 2, 230 * S, seg(t, 41.2, 41.55) * (1 - seg(t, 42.5, 42.7)), { dot: C.gold });
+  UI.pill('Lauf zerstört', W / 2, 230 * S, seg(t, 42.7, 43.05), { icon: 'x' });
+});
+
+// 10: dark, soft 7x7 steel or titanium: nearly invisible, supple, bite-proof
+const BITE10 = 53.3;
+shot(44.45, 54.75, t => {
+  if (t < 52.9) {
+    only([lure2.wrap, steel.mesh, braid, swivel]); const lx = MX + 1 + .3 * (t - 44.45);
+    lure2.wrap.position.set(lx, MY, 0); lure2.wrap.rotation.set(Math.sin(t * 18) * .14, Math.sin(t * 9) * .08, 0); lure2.wrap.updateMatrixWorld(true);
+    const n = nose(lure2), sw = n.clone().add(V3(1.2, .4, 0));
+    const pts = []; for (let i = 0; i <= 12; i++) { const u = i / 12; pts.push(n.clone().lerp(sw, u).add(V3(0, Math.sin(u * Math.PI) * .05 * Math.sin(t * 3 + u * 4), Math.sin(u * 6 + t * 2) * .02))); }
+    tube(steel.mesh, pts, .005); swivel.position.copy(sw); swivel.rotation.set(0, Math.PI / 2, 0);
+    tube(braid, [sw, sw.clone().add(V3(.6, .3, 0)), sw.clone().add(V3(1.6, .9, 0))], .006);
+    lookFrom(cam, V3(lx + .4, MY + .2, 2.8), V3(lx + .35, MY + .1, 0));
+    underMode(t, 'open', { focus: 2.8 });
+  } else {
+    only([J.root, lure2.wrap]); const shake = Math.sin((t - BITE10) * 22) * .14 * Math.sin(Math.PI * seg(t, BITE10, 54.6));
+    J.root.position.copy(JP); J.root.rotation.set(0, -.25 + shake, 0); J.open(lerp(.5, .12, eo(seg(t, 52.9, 53.3)))); J.root.updateMatrixWorld(true);
+    lure2.wrap.position.copy(J.root.localToWorld(V3(.62, -.02, .05))); lure2.wrap.rotation.set(0, -.25 + shake + .3, 0);
+    lookFrom(cam, JP.clone().add(V3(1.9, .45, 1.5)), JP.clone().add(V3(.4, -.05, 0)));
+    underMode(t, 'open', { focus: 2.3, aper: 2.2 });
+  }
+}, t => {
+  const lx = MX + 1 + .3 * (t - 44.45);
+  if (t < 52.9) {
+    { const s = sp(V3(lx + .9, MY + .25, 0)); UI.callout('Titan', s.x, s.y, -40, -60, seg(t, 45.9, 46.25) * (1 - seg(t, 47.2, 47.4)), { dot: '#b8c0c8' }); }
+    UI.pill('7×7 Stahlvorfach', W / 2, 230 * S, seg(t, 47.4, 47.75) * (1 - seg(t, 49.2, 49.4)), { dot: '#555a60' });
+    UI.pill('dunkle Farbe', W / 2, 230 * S, seg(t, 49.4, 49.75) * (1 - seg(t, 51.2, 51.4)), { dot: '#222' });
+    UI.pill('kaum sichtbar', W / 2, 230 * S, seg(t, 51.35, 51.7) * (1 - seg(t, 52.4, 52.6)), { dot: C.blue });
+    UI.pill('extrem weich', W / 2, 230 * S, seg(t, 52.6, 52.8), { dot: C.green });
+  } else {
+    J.root.updateMatrixWorld(true); const corner = sp(J.root.localToWorld(V3(.35, -.01, .3)));
+    g.save(); g.strokeStyle = 'rgba(40,44,48,.95)'; g.lineWidth = 2.6 * S; g.beginPath(); g.moveTo(corner.x, corner.y); g.lineTo(W + 20, corner.y - 380 * S); g.stroke(); g.restore();
+    UI.pill('hält jedem Hechtzahn stand', W / 2, 230 * S, seg(t, 53.9, 54.25), { dot: C.green });
+  }
+});
+
+// 11: verdict
+shot(54.75, 63.2, t => {
+  only([pike]); const u = seg(t, 54.75, 63.2);
+  fishAt(pike, V3(MX + 1 + u * 2.4, MY, -.3), 0, 0, 0); pike.material.userData.amp.value = .05;
+  lookFrom(cam, V3(MX + 1.8 + u * 2.0, MY + .3, 4.2), V3(MX + 1.8 + u * 2.0, MY, 0));
+  underMode(t, 'open', { focus: 4.3 });
+}, t => {
+  UI.scoreCard('Vorfach', [['Fluorocarbon dünn', false, seg(t, 55.0, 55.3)], ['Fluorocarbon 1 mm', false, seg(t, 55.4, 55.7)], ['Stahl oder Titan', true, seg(t, 58.4, 58.7)]], seg(t, 54.85, 55.2));
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 4.1: .35, 9.85: .4, 13.8: .4, 17.45: .35, 21.55: .3, 27.65: .3, 31.65: .35, 35.45: .4, 44.45: .4, 54.75: .4 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 63.2;
+window.render = t => { t += OFF;
+  UI.clear(); pg.visible = false;
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 59.8, 7, [['Stahl oder Titan.', 0]], [['Immer', 1], ['.', 0]], logo);
+};
+window.EV = [
+  { t: BITE, type: 'strike' }, { t: SNAP, type: 'snap' }, { t: 4.1, type: 'whoosh' }, { t: 9.85, type: 'whoosh' }, ...[12.3, 12.38, 12.46, 12.54, 12.62, 12.7].map(t => ({ t, type: 'tick' })), { t: 13.8, type: 'dive' },
+  { t: 16.0, type: 'tick' }, { t: 17.45, type: 'whoosh' }, { t: 18.8, type: 'ding' }, { t: 21.55, type: 'whoosh' }, { t: 22.0, type: 'strike' }, { t: SHAKE0, type: 'swirl' }, { t: 25.1, type: 'saw', d: 2.4 },
+  { t: 27.65, type: 'whoosh' }, { t: BREAK, type: 'snap' }, { t: 31.65, type: 'whoosh' }, { t: 35.45, type: 'whoosh' }, { t: 44.45, type: 'whoosh' }, { t: 52.9, type: 'whoosh' }, { t: BITE10, type: 'strike' },
+  { t: 54.0, type: 'ding' }, { t: 54.75, type: 'whoosh' }, { t: 55.0, type: 'tick' }, { t: 55.4, type: 'tick' }, { t: 58.4, type: 'ding' }, { t: 59.8, type: 'whoosh' }, { t: 60.4, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>

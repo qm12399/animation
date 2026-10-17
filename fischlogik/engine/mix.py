@@ -111,6 +111,11 @@ for e in ev['ev']:
     elif k == 'strike':
         put(fx, whoosh(.25, .8), at - .1, .45); put(fx, lp(noise(.3), 900) * np.exp(-t_(.3) * 14), at + .05, .7); put(fx, thump(.5, 90), at + .05, .4)
     elif k == 'tick': put(fx, click(1.4, .5), at, .3)
+    elif k == 'snap':
+        tt = t_(.4); put(fx, hp(noise(.4), 2500) * np.exp(-tt * 60) * .6 + np.sin(2 * np.pi * (2400 - 1600 * tt) * tt) * np.exp(-tt * 14) * .18, at, .55); put(fx, whoosh(.3, .4), at + .03, .2)
+    elif k == 'saw':
+        d = e.get('d', 1.0); tt = t_(d); env = (np.abs(np.sin(2 * np.pi * 6 * tt)) ** 2) * np.minimum(1, tt / .1) * np.minimum(1, (d - tt) / .2)
+        put(fx, bp(noise(d), 1800, 7000) * env * .35, at, .4, -.15)
     elif k == 'ding': put(fx, ding(.5), at, .35)
 
 def rms(x): return np.sqrt(np.mean(x ** 2) + 1e-12)
