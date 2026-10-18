@@ -3,17 +3,19 @@
 Kênh TikTok tiếng Đức về mẹo câu cá, tách riêng khỏi các kênh khác. Video làm bằng code theo thư viện
 [lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (canvas/WebGL render từng frame, TTS, nhạc tự viết, mux ffmpeg).
 
-Trạng thái: **đang gom thông tin, chưa sản xuất**. Chờ video mẫu và lệnh bắt đầu.
+Trạng thái: đang sản xuất, đã xong Folge 1-7 (`ep01`-`ep07`). Quy trình và luật: `../CLAUDE.md`.
 
-## Cấu trúc dự kiến
+## Cấu trúc
 
 ```
 fischlogik/
-  README.md        file này
-  SETUP.md         cách cài và chạy thư viện trong container cloud
-  BRIEF.md         style, ngôn ngữ, giọng, độ dài, khung hình (điền sau khi có video mẫu)
-  template/        code dùng chung cho mọi tập (một lần viết, tái sử dụng)
-  episodes/<slug>/ mỗi tập: script, timeline, TREATMENT.md, build.sh, output
+  STYLEGUIDE.md  chuẩn visual (bắt buộc)
+  BRIEF.md       khung hình, độ dài, đồ giao mỗi tập
+  SETUP.md       cài đặt (cloud và local), lệnh sản xuất
+  REFERENCE.md   phân tích kịch bản video mẫu
+  brand/         logo
+  engine/        code dùng chung: cảnh 3D, cá, mồi, UI, mix, mux
+  epNN/          mỗi tập: index.html, TREATMENT.md, voice/, build.sh, mp4, srt, poster
 ```
 
 ## Quy trình rút gọn (tiết kiệm usage)

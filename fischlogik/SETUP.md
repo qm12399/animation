@@ -44,3 +44,29 @@ sh epNN/build.sh
 ```
 Lưu ý: `core/render/mux.sh` lỗi với ffmpeg 6.1 ở container này, dùng `engine/mux.sh`.
 Object động (InstancedMesh/Points đổi vị trí) phải đặt `frustumCulled = false`.
+
+## Chạy trên máy local (Mac / Linux / Windows qua WSL)
+
+Cần: git, Node 20+, Python 3.12, ffmpeg, khoảng 5 GB trống. Windows: chạy mọi lệnh trong WSL (Ubuntu), vì `build.sh` là shell script.
+
+```sh
+# 1. repo dự án
+git clone https://github.com/qm12399/animation.git && cd animation
+git checkout claude/magical-thompson-j7fky1
+# 2. thư viện, đặt cạnh repo (không commit vào repo)
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/lemomo-ai/lemo-opuscar ../lemo-opuscar
+cd ../lemo-opuscar && npm install && npx playwright install chromium-headless-shell
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt faster-whisper
+cd ../animation
+# 3. biến môi trường (thêm vào ~/.zshrc hoặc ~/.bashrc)
+export LIB=$(cd ../lemo-opuscar && pwd)
+export PY=$LIB/.venv/bin/python
+export WORKERS=4            # số tiến trình render; để bằng số nhân CPU trừ 2
+# 4. thử: chỉ mix + mux lại Folge 7 từ video sẵn có (vài phút)
+mkdir -p fischlogik/ep07/out && ffmpeg -i fischlogik/ep07/fischlogik-folge-07.mp4 -an -c copy fischlogik/ep07/out/video.mp4
+SKIP_VIDEO=1 sh fischlogik/ep07/build.sh
+```
+
+Trên máy có GPU, render nhanh hơn container cloud nhiều (cloud: khoảng 60 phút một tập vì không có GPU).
+Mac tự dùng Metal. Linux có GPU: thử `LEMO_ANGLE=gl` nếu log báo "software rendering".
+Lần đầu chạy `transcribe.py` sẽ tải model Whisper `small` (khoảng 500 MB).
