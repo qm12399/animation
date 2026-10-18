@@ -1,0 +1,317 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng } from './engine/core.js';
+import { buildLake, shore, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, castPose } from './engine/angler.js';
+import { makeFish, makeSchool, placeSchool } from './engine/fish.js';
+import { buildUnder, bedHeight } from './engine/under.js';
+import { buildSection } from './engine/section.js';
+import { makeLure } from './engine/lures.js';
+import { makeWeather, rain, flash } from './engine/weather.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['Sonnenschein', 'wolkenloser', 'schlechteste', 'Postkartenwetter', 'Beißflaute', 'Luftdruck', 'Hochdruckgebiet', 'Wassersäule', 'Schwimmblase', 'langsam', 'Blut', 'Druckanstieg', 'Magen', 'träge', 'Grund', 'Maulsperre', 'Beißfenster', 'Wetterumschwung', 'dunkle', 'Wind', 'fällt', 'Spannung', 'gedämpfte', 'Scheu', 'Tiefdruckgebiet', 'Regen', 'Fressrausch', 'Sonne', 'kleine', 'Schatten', 'Kapitale', 'Unwetter']));
+
+// ---------------- worlds ----------------
+const L = buildLake(logo), A = makeAngler(logo); L.scene.add(A.root);
+const WX = makeWeather(L), U = buildUnder(), X = buildSection();
+const cam = new THREE.PerspectiveCamera(46, W / H, .02, 1200);
+const sp = p => toScreen(cam, p);
+const spot = shore(PLACES.bankTh, 2.4); spot.y = L.terrainHeight(spot.x, spot.z);
+const SUNP = spot.clone().add(V3(-60, 85, -300));
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0) { f.position.copy(p); f.rotation.set(0, yaw, pitch); f.material.userData.phase.value = phase; }
+function lakeMode(t, storm, o = {}) {
+  TIME.value = t; WX.set(storm, o.drift ?? t, o.sun ?? SUNP); L.setReflect(o.refl ?? true); L.setFog(...(o.fog || [45, 300])); L.shadowFocus(...(o.shadow || [spot, 16])); L.fishGlow.visible = false;
+  draw(L.scene, cam, { focus: o.focus ?? 6, aper: o.aper ?? 3, vig: .38, bloom: lerp(.6, .35, storm), sat: lerp(1.05, .8, storm) });
+}
+function underMode(t, a, k = 1, b, o = {}) { TIME.value = t; U.setMode(a, k, b); U.update(t); U.murk.visible = false; draw(U.scene, cam, { focus: o.focus ?? 3, aper: o.aper ?? 2.5, vig: .5, bloom: .5, sat: o.sat ?? .95 }); }
+
+// underwater actors on the shelf (bed about -1.3)
+const perch = makeFish('barsch', .55), zander = makeFish('zander', .8), pike = makeFish('hecht', 1.3, { amp: .06, freq: 5 });
+const lure = makeLure('gummifisch', .28);
+const R = rng(8), baitList = []; for (let i = 0; i < 34; i++) baitList.push({ p: V3(), yaw: (R() - .5) * .5, phase: R() * 6, o: V3((R() - .5) * 1.6, (R() - .5) * .5, (R() - .5) * 1.2), d: V3(R() - .5, R() * .6, R() - .5).normalize() });
+const bait = makeSchool('ukelei', .16, baitList);
+const ACT = [perch, zander, pike, lure.wrap, bait]; U.scene.add(...ACT); ACT.forEach(o => o.frustumCulled = false);
+const only = l => ACT.forEach(o => o.visible = l.includes(o));
+const ST = V3(-3, -1.3, 3);                       // stage on the shelf
+const bed = (x, z) => bedHeight(x, z);
+
+// ---------------- overlay helpers ----------------
+function bigWord(text, k, y = 330, color = C.gold) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 3) * clamp((1 - k) * 4 + .2); const sc = lerp(1.6, 1, eo(clamp(k * 3))); g.translate(W / 2, y * S); g.scale(sc, sc);
+  g.font = `italic 900 ${74 * S}px PF`; g.textAlign = 'center'; g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 18 * S; g.fillStyle = color; g.fillText(text, 0, 0); g.restore(); }
+function badge(letter, x, y, k, color, r = 46) { if (k <= 0) return; const sc = UI.back ? 1 : 1, e = clamp(k * 1.4); g.save(); g.globalAlpha = clamp(k * 3); g.translate(x, y); g.scale(lerp(.6, 1, eo(e)), lerp(.6, 1, eo(e)));
+  g.shadowColor = 'rgba(0,0,0,.45)'; g.shadowBlur = 18 * S; g.fillStyle = color; g.beginPath(); g.arc(0, 0, r * S, 0, 7); g.fill(); g.shadowBlur = 0;
+  g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 3 * S; g.stroke(); g.fillStyle = '#fff'; g.font = `800 ${r * 1.15 * S}px PJS`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(letter, 0, 3 * S); g.restore(); }
+function barometer(x, y, val, k, trend) { if (k <= 0) return; const r = 62 * S, a0 = Math.PI * .8, a1 = Math.PI * 2.2, va = v => lerp(a0, a1, clamp((v - 980) / 70));
+  g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.arc(x, y, r + 14 * S, 0, 7); g.fill();
+  g.lineCap = 'round'; g.lineWidth = 7 * S; for (const [v0, v1, col] of [[980, 1005, C.blue], [1005, 1025, 'rgba(255,255,255,.35)'], [1025, 1050, C.orange]]) { g.strokeStyle = col; g.beginPath(); g.arc(x, y, r, va(v0), va(v1)); g.stroke(); }
+  const a = va(val); g.strokeStyle = '#fff'; g.lineWidth = 4 * S; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * r * .8, y + Math.sin(a) * r * .8); g.stroke();
+  g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y, 6 * S, 0, 7); g.fill();
+  g.font = `800 ${16 * S}px PJS`; g.textAlign = 'center'; g.fillText(`${Math.round(val)} hPa`, x, y + 36 * S);
+  if (trend) { g.fillStyle = trend > 0 ? C.orange : C.blue; g.font = `800 ${20 * S}px PJS`; g.fillText(trend > 0 ? '▲' : '▼', x + r + 34 * S, y + 7 * S); }
+  g.restore(); }
+function bladder(f, k, squeeze = 0) { if (k <= 0) return; f.updateMatrixWorld(true); const c = sp(f.localToWorld(V3(-.02, .035, 0))), ex = sp(f.localToWorld(V3(.15, .035, 0))), ey = sp(f.localToWorld(V3(-.02, .085, 0)));
+  const rx = Math.hypot(ex.x - c.x, ex.y - c.y) * lerp(1, .78, squeeze), ry = Math.hypot(ey.x - c.x, ey.y - c.y) * lerp(1, .45, squeeze), rot = Math.atan2(ex.y - c.y, ex.x - c.x);
+  g.save(); g.globalAlpha = clamp(k * 2); g.fillStyle = squeeze > .3 ? 'rgba(240,120,100,.55)' : 'rgba(210,240,255,.5)'; g.strokeStyle = '#fff'; g.lineWidth = 2 * S;
+  g.shadowColor = squeeze > .3 ? 'rgba(255,90,70,.8)' : 'rgba(170,230,255,.9)'; g.shadowBlur = 14 * S; g.beginPath(); g.ellipse(c.x, c.y, rx, ry, rot, 0, 7); g.fill(); g.stroke(); g.restore(); return c; }
+function postcard(k) { if (k <= 0) return; const b = 18 * S, e = eo(clamp(k * 2)); g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = '#f6f1e6';
+  g.fillRect(0, 0, W, b * e * 1.4); g.fillRect(0, H - b * e * 1.4, W, b * e * 1.4); g.fillRect(0, 0, b * e, H); g.fillRect(W - b * e, 0, b * e, H);
+  g.translate(W - 120 * S, 120 * S); g.rotate(.12); g.strokeStyle = '#c94f3a'; g.lineWidth = 3 * S; g.setLineDash([4 * S, 3 * S]); g.strokeRect(-48 * S, -58 * S, 96 * S, 116 * S); g.setLineDash([]);
+  g.fillStyle = 'rgba(246,241,230,.92)'; g.fillRect(-44 * S, -54 * S, 88 * S, 108 * S); g.fillStyle = '#e8a23a'; g.beginPath(); g.arc(0, -12 * S, 22 * S, 0, 7); g.fill();
+  g.fillStyle = '#c94f3a'; g.font = `800 ${13 * S}px PJS`; g.textAlign = 'center'; g.fillText('SA · SO', 0, 34 * S); g.restore(); }
+function weatherBar(t, k, t0, t1) { if (k <= 0) return; const x0 = W / 2 - 230 * S, x1 = W / 2 + 230 * S, y = 236 * S, u = seg(t, t0, t1);
+  g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.roundRect(x0 - 30 * S, y - 62 * S, x1 - x0 + 60 * S, 104 * S, 20 * S); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 6 * S; g.lineCap = 'round'; g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+  const w0 = lerp(x0, x1, .52), w1 = lerp(x0, x1, .8), kw = seg(t, 32.75, 33.3); if (kw > 0) { g.strokeStyle = C.gold; g.lineWidth = 10 * S; g.shadowColor = C.gold; g.shadowBlur = 16 * S * kw; g.beginPath(); g.moveTo(w0, y); g.lineTo(lerp(w0, w1, eo(kw)), y); g.stroke(); g.shadowBlur = 0; }
+  const icon = (x, kind) => { g.save(); g.translate(x, y - 32 * S); if (kind === 'sun') { g.fillStyle = C.orange; g.beginPath(); g.arc(0, 0, 10 * S, 0, 7); g.fill(); g.strokeStyle = C.orange; g.lineWidth = 2.5 * S; for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; g.beginPath(); g.moveTo(Math.cos(a) * 14 * S, Math.sin(a) * 14 * S); g.lineTo(Math.cos(a) * 19 * S, Math.sin(a) * 19 * S); g.stroke(); } }
+    else { g.fillStyle = kind === 'rain' ? '#8a96a8' : '#d8dde6'; for (const [cx, cy, rr] of [[-8, 2, 9], [4, -3, 12], [14, 3, 8]]) { g.beginPath(); g.arc(cx * S, cy * S, rr * S, 0, 7); g.fill(); } if (kind === 'rain') { g.strokeStyle = C.blue; g.lineWidth = 2 * S; for (const dx of [-8, 2, 12]) { g.beginPath(); g.moveTo(dx * S, 14 * S); g.lineTo((dx - 3) * S, 22 * S); g.stroke(); } } } g.restore(); };
+  icon(x0 + 14 * S, 'sun'); icon(lerp(x0, x1, .52), 'cloud'); icon(x1 - 10 * S, 'rain');
+  const mx = lerp(x0, x1, u); g.fillStyle = '#fff'; g.beginPath(); g.arc(mx, y, 8 * S, 0, 7); g.fill();
+  if (kw > 0) { g.globalAlpha = clamp(kw * 3); g.fillStyle = C.gold; g.font = `800 ${15 * S}px PJS`; g.textAlign = 'center'; g.fillText('Beißfenster', (w0 + w1) / 2, y + 28 * S); }
+  g.restore(); }
+function bolt(t, t0, x, y) { const k = t - t0; if (k < 0 || k > .35) return; const r = rng(Math.floor(t0 * 10)); g.save(); g.globalAlpha = 1 - k / .35; g.strokeStyle = '#f4f8ff'; g.lineWidth = 3.5 * S; g.shadowColor = '#cfe0ff'; g.shadowBlur = 24 * S; g.beginPath(); g.moveTo(x, y);
+  let px = x, py = y; for (let i = 0; i < 9; i++) { px += (r() - .5) * 60 * S; py += 40 * S; g.lineTo(px, py); } g.stroke(); g.restore(); }
+function rainRings(t, k) { if (k <= 0) return; const r = rng(3); g.save(); g.strokeStyle = 'rgba(220,240,240,.6)'; g.lineWidth = 1.4 * S;
+  for (let i = 0; i < 26; i++) { const x = ST.x - 3 + r() * 6, z = ST.z - 4 + r() * 5, ph = (t * 1.4 + r()) % 1; if (ph > k * 1.2) continue; const c = sp(V3(x, 0, z)); if (c.y < 0 || c.y > H * .45) continue;
+    g.globalAlpha = (1 - ph) * .9; g.beginPath(); g.ellipse(c.x, c.y, ph * 26 * S, ph * 6 * S, 0, 0, 7); g.stroke(); } g.restore(); }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+
+// 1: hook. Blazing sun in a cloudless sky, tilt down to the angler on a glassy lake
+shot(0, 5.0, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(t < 2.2 ? POSES.idle : castPose(t - 2.2), t);
+  const u = eio(seg(t, 0, 2.6)), P = spot.clone().add(V3(lerp(.3, .7, u), lerp(1.3, 2.0, u), lerp(2.6, 4.6, seg(t, 0, 5))));
+  const at = SUNP.clone().lerp(spot.clone().add(V3(.9, 2.6, -10)), u);
+  lookFrom(cam, P, at);
+  lakeMode(t, 0, { focus: lerp(400, 5, u), aper: lerp(0, 3, u) });
+}, t => {
+  UI.pill('wolkenlos', W / 2, 230 * S, seg(t, 1.3, 1.65) * (1 - seg(t, 3.2, 3.45)), { dot: C.orange });
+  UI.pill('schlechtestes Wetter', W / 2, 230 * S, seg(t, 3.45, 3.8), { icon: 'x' });
+});
+
+// 2: postcard weather on the weekend -> total bite drought (+ title)
+shot(5.0, 11.45, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.idle, t);
+  const u = seg(t, 5.0, 11.45), P = spot.clone().add(V3(lerp(6.5, 3.2, eio(u)), lerp(4.2, 2.4, eio(u)), lerp(7, 4.2, eio(u))));
+  lookFrom(cam, P, spot.clone().add(V3(lerp(-3, -1, u), lerp(.5, 1.4, u), lerp(-14, -5, u))));
+  lakeMode(t, 0, { focus: P.distanceTo(spot), aper: 1.5 });
+}, t => {
+  UI.title(8, [['Blauer Himmel,', 0]], [['leere', 1], [' Rute.', 0]], seg(t, 5.1, 5.6) * (1 - seg(t, 7.45, 7.75)));
+  postcard(seg(t, 7.2, 7.5) * (1 - seg(t, 8.85, 9.1)));
+  UI.pill('Wochenende', W / 2, 230 * S, seg(t, 8.0, 8.3) * (1 - seg(t, 8.85, 9.05)), { dot: C.orange });
+  UI.bigStat('0', 'Bisse', W / 2, 250 * S, seg(t, 10.2, 10.6));
+});
+
+// 3: the reason is air pressure: a high moves in over the lake (map)
+const CENTER = V3(0, .1, 0);
+shot(11.45, 14.75, t => {
+  A.root.position.copy(spot); A.apply(POSES.idle, t);
+  lookFrom(cam, keys([[11.45, V3(0, 70, 30)], [12.6, V3(0, 92, 4)], [14.75, V3(0, 84, 3)]], t, eio), CENTER, V3(0, 0, -1));
+  lakeMode(t, 0, { refl: false, fog: [200, 900], shadow: [V3(), 70], focus: 1e6, aper: 0 });
+}, t => {
+  for (let i = 0; i < 3; i++) UI.ring(cam, CENTER, 22 + i * 13, seg(t, 12.4 + i * .2, 13.2 + i * .2), 'rgba(255,255,255,.75)', { n: 60 + i * 14, dot: 2.2 });
+  UI.pill('Luftdruck', W / 2, 230 * S, seg(t, 12.2, 12.55) * (1 - seg(t, 13.1, 13.3)), { dot: C.blue });
+  const c = sp(CENTER); badge('H', c.x, c.y, seg(t, 13.25, 13.7), '#2f6fbf', 52);
+  UI.pill('Hochdruckgebiet', W / 2, 230 * S, seg(t, 13.35, 13.7), { dot: '#2f6fbf' });
+});
+
+// 4: the pressure on the water column rises sharply (cross-section)
+shot(14.75, 17.25, t => {
+  TIME.value = t; X.update(t); const u = X.slabM.uniforms; u.uLayers.value = 0; u.uReveal.value = 0; u.uDead.value = 0; X.oxM.opacity = 0;
+  const v = seg(t, 14.75, 17.25); lookFrom(cam, V3(lerp(-.4, .3, v), lerp(-1.2, -1.8, v), lerp(17, 15, v)), V3(0, -2.2, 0));
+  draw(X.scene, cam, { vig: .42, bloom: .3, sat: .9 });
+}, t => {
+  const yS = sp(V3(0, 0, 0)).y, n = 5;
+  for (let i = 0; i < n; i++) { const x = W * (.18 + i * .16), ph = (t * .9 + i * .13) % 1, k = seg(t, 15.0 + i * .08, 15.3 + i * .08);
+    if (k > 0) UI.arrow(x, yS - 230 * S + ph * 60 * S, x, yS - 40 * S + ph * 30 * S, k, `rgba(255,${lerp(255, 170, seg(t, 15.4, 16.6)) | 0},120,.9)`, 5); }
+  barometer(W / 2, 250 * S, lerp(1013, 1036, eio(seg(t, 15.0, 16.7))), seg(t, 14.85, 15.2), 1);
+  { const s = sp(V3(-2.6, -3.4, 0)); UI.callout('Wassersäule', s.x, s.y, 30, 70, seg(t, 15.8, 16.15), { dot: C.blue }); }
+});
+
+// 5: perch and zander have a closed swim bladder (x-ray)
+shot(17.25, 20.3, t => {
+  only([perch, zander]); perch.material.userData.amp.value = .06; zander.material.userData.amp.value = .05;
+  fishAt(perch, V3(ST.x - .35 + .05 * Math.sin(t), -.95, ST.z + .2), 0, 0, t); fishAt(zander, V3(ST.x + .4, -1.0 + .04 * Math.sin(t * .8), ST.z - .25), 0, 0, t * .9);
+  const v = seg(t, 17.25, 20.3); lookFrom(cam, V3(ST.x + .09, -.9, ST.z + lerp(3.6, 3.3, v)), V3(ST.x + .09, -1.0, ST.z));
+  underMode(t, 'clear', 1, null, { focus: 3.4 });
+}, t => {
+  { perch.updateMatrixWorld(true); const s = sp(perch.localToWorld(V3(.2, .12, 0))); UI.callout('Barsch', s.x, s.y, -20, -90, seg(t, 17.35, 17.7), { dot: C.green }); }
+  { zander.updateMatrixWorld(true); const s = sp(zander.localToWorld(V3(.2, .1, 0))); UI.callout('Zander', s.x, s.y, 10, -150, seg(t, 17.95, 18.3), { dot: '#b9c0b0' }); }
+  const kb = seg(t, 18.9, 19.4); bladder(perch, kb); bladder(zander, kb);
+  UI.pill('geschlossene Schwimmblase', W / 2, 230 * S, seg(t, 19.4, 19.75), { dot: '#bfe6ff' });
+});
+
+// 6: they can only balance the pressure very slowly, through the blood
+shot(20.3, 24.1, t => {
+  only([perch]); perch.material.userData.amp.value = .05;
+  fishAt(perch, V3(ST.x, -.95 + .03 * Math.sin(t), ST.z), 0, 0, t);
+  const v = seg(t, 20.3, 24.1); lookFrom(cam, V3(ST.x + .02, -.9, ST.z + lerp(1.55, 1.3, v)), V3(ST.x + .02, -.97, ST.z));
+  underMode(t, 'clear', 1, null, { focus: 1.4, aper: 3 });
+}, t => {
+  const c = bladder(perch, 1);
+  { const k = seg(t, 20.4, 20.8), x0 = W / 2 - 150 * S, y = 250 * S, p = lerp(0, .07, seg(t, 20.8, 24.1));
+    if (k > 0) { g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.roundRect(x0 - 24 * S, y - 46 * S, 348 * S, 80 * S, 18 * S); g.fill();
+      g.fillStyle = '#fff'; g.font = `800 ${15 * S}px PJS`; g.textAlign = 'left'; g.fillText('Druckausgleich', x0, y - 14 * S); g.textAlign = 'right'; g.fillStyle = C.gold; g.fillText(`${Math.round(p * 100)} %`, x0 + 300 * S, y - 14 * S);
+      g.fillStyle = 'rgba(255,255,255,.2)'; g.beginPath(); g.roundRect(x0, y + 2 * S, 300 * S, 12 * S, 6 * S); g.fill(); g.fillStyle = C.gold; g.beginPath(); g.roundRect(x0, y + 2 * S, Math.max(12 * S, 300 * S * p), 12 * S, 6 * S); g.fill(); g.restore(); } }
+  UI.pill('extrem langsam', W / 2, 345 * S, seg(t, 22.1, 22.45), { icon: 'x' });
+  // blood: red dots crawling along a vessel into the bladder
+  const kv = seg(t, 22.9, 23.3); if (kv > 0 && c) { perch.updateMatrixWorld(true); const a = sp(perch.localToWorld(V3(.3, -.04, 0))), m = sp(perch.localToWorld(V3(.12, -.06, 0)));
+    g.save(); g.globalAlpha = clamp(kv * 3); g.strokeStyle = 'rgba(200,40,50,.8)'; g.lineWidth = 4 * S; g.beginPath(); g.moveTo(a.x, a.y); g.quadraticCurveTo(m.x, m.y, c.x, c.y); g.stroke();
+    g.fillStyle = '#ff6a6a'; for (let i = 0; i < 6; i++) { const u = ((t * .12 + i / 6) % 1), x = (1 - u) ** 2 * a.x + 2 * u * (1 - u) * m.x + u * u * c.x, y = (1 - u) ** 2 * a.y + 2 * u * (1 - u) * m.y + u * u * c.y; g.beginPath(); g.arc(x, y, 3.5 * S, 0, 7); g.fill(); }
+    g.restore(); UI.callout('Blut', a.x, a.y, 30, 70, kv, { dot: C.red }); }
+});
+
+// 7: a sudden rise in pressure literally hits their stomach
+shot(24.1, 27.55, t => {
+  only([perch]); perch.material.userData.amp.value = .03;
+  fishAt(perch, V3(ST.x, -.97, ST.z), 0, -.04 * ss(seg(t, 25.6, 26.4)), t * .5);
+  const v = seg(t, 24.1, 27.55); lookFrom(cam, V3(ST.x + .02, -.85, ST.z + lerp(1.5, 1.75, v)), V3(ST.x + .02, -.98, ST.z));
+  underMode(t, 'clear', 1, null, { focus: 1.6, aper: 3 });
+}, t => {
+  const sq = eo(seg(t, 25.6, 26.3)); bladder(perch, 1, sq);
+  perch.updateMatrixWorld(true); const top = sp(perch.localToWorld(V3(0, .14, 0)));
+  for (let i = -1; i <= 1; i++) { const ph = (t * 1.6 + i * .3) % 1, k = seg(t, 24.4, 24.8); UI.arrow(top.x + i * 60 * S, top.y - 170 * S + ph * 40 * S, top.x + i * 60 * S, top.y - 30 * S, k, 'rgba(255,170,120,.95)', 5); }
+  UI.pill('plötzlicher Druckanstieg', W / 2, 230 * S, seg(t, 24.5, 24.85) * (1 - seg(t, 26.75, 27.0)), { dot: C.orange });
+  { const s = sp(perch.localToWorld(V3(.05, -.07, 0))); UI.callout('Magen', s.x, s.y, -10, 110, seg(t, 27.05, 27.35), { dot: C.red }); }
+});
+
+// 8: sluggish, glued to the bottom, lockjaw: a lure swims past untouched
+shot(27.55, 32.3, t => {
+  only([perch, zander, lure.wrap]);
+  const sink = eio(seg(t, 27.8, 29.6)); perch.material.userData.amp.value = lerp(.04, .006, sink); zander.material.userData.amp.value = lerp(.04, .006, sink);
+  fishAt(perch, V3(ST.x - .5, lerp(-.95, bed(ST.x - .5, ST.z + .2) + .1, sink), ST.z + .2), 0, 0, t * .3); fishAt(zander, V3(ST.x + .5, lerp(-1.0, bed(ST.x + .5, ST.z - .3) + .1, sink), ST.z - .3), .1, 0, t * .3);
+  const lx = lerp(ST.x - 1.7, ST.x + 1.5, seg(t, 29.6, 32.0)); lure.wrap.position.set(lx, -1.0 + .04 * Math.sin(t * 9), ST.z + .45); lure.wrap.rotation.set(0, 0, .1 * Math.sin(t * 9));
+  const v = seg(t, 27.55, 32.3); lookFrom(cam, V3(ST.x + lerp(-.2, .1, v), lerp(-.85, -1.0, v), ST.z + 3.9), V3(ST.x, -1.12, ST.z));
+  underMode(t, 'clear', 1, null, { focus: 3.9 });
+}, t => {
+  UI.pill('träge', W / 2, 230 * S, seg(t, 28.5, 28.85) * (1 - seg(t, 29.2, 29.4)), { dot: C.blue });
+  UI.pill('passiv am Grund', W / 2, 230 * S, seg(t, 29.4, 29.75) * (1 - seg(t, 31.1, 31.3)), { dot: '#b9c0b0' });
+  UI.pill('Maulsperre', W / 2, 230 * S, seg(t, 31.3, 31.65), { icon: 'x' });
+});
+
+// 9: the best bite window opens right before the weather turns (time-lapse sky)
+shot(32.3, 36.3, t => {
+  A.root.position.copy(spot); A.apply(POSES.idle, t);
+  const v = seg(t, 32.3, 36.3); lookFrom(cam, spot.clone().add(V3(2.6 - v * .4, 1.5, 1.2)), spot.clone().add(V3(-14, 12, -60)));
+  lakeMode(t, lerp(0, .5, ss(v)), { drift: 32.3 + (t - 32.3) * 60, focus: 30, aper: 1 });
+}, t => {
+  weatherBar(t, seg(t, 32.4, 32.75), 32.6, 36.2);
+  UI.pill('Wetterumschwung', W / 2, 350 * S, seg(t, 35.35, 35.7), { dot: '#8a96a8' });
+});
+
+// 10: dark clouds, wind ripples the water, the pressure drops: tension released
+shot(36.3, 41.7, t => {
+  A.root.position.copy(spot); A.apply(POSES.idle, t);
+  const v = seg(t, 36.3, 41.7), P = spot.clone().add(V3(lerp(-3, -5, v), lerp(1.0, 1.4, v), lerp(-3, -5.5, v)));
+  lookFrom(cam, P, P.clone().add(V3(-8, 1.4, -30)));
+  lakeMode(t, lerp(.5, .92, ss(seg(t, 36.3, 39.0))), { drift: 36.3 * 1 + (t - 36.3) * 8, focus: 20, aper: 1 });
+}, t => {
+  UI.streaks(t, seg(t, 37.7, 38.1) * (1 - seg(t, 40.4, 40.8)), 1, 9, .38, .6);
+  UI.pill('dunkle Wolken', W / 2, 230 * S, seg(t, 36.5, 36.85) * (1 - seg(t, 37.6, 37.8)), { dot: '#8a96a8' });
+  UI.pill('Wind', W / 2, 230 * S, seg(t, 37.8, 38.15) * (1 - seg(t, 39.0, 39.2)), { dot: C.blue });
+  barometer(W / 2, 250 * S, lerp(1036, 1004, eio(seg(t, 39.3, 40.6))), seg(t, 39.15, 39.45), -1);
+  UI.pill('Spannung löst sich', W / 2, 375 * S, seg(t, 40.5, 40.85), { dot: C.green });
+});
+
+// 11: muted light takes away the predators' caution: they lift off the bottom
+shot(41.7, 44.2, t => {
+  only([perch, zander]); const up = eio(seg(t, 42.2, 43.9)); perch.material.userData.amp.value = lerp(.01, .07, up); zander.material.userData.amp.value = lerp(.01, .06, up);
+  fishAt(perch, V3(ST.x - .5 + up * .3, lerp(bed(ST.x - .5, ST.z + .2) + .1, -.8, up), ST.z + .2), 0, -.25 * Math.sin(Math.PI * up), t); fishAt(zander, V3(ST.x + .5 + up * .2, lerp(bed(ST.x + .5, ST.z - .3) + .1, -.9, up), ST.z - .3), .1, -.2 * Math.sin(Math.PI * up), t);
+  lookFrom(cam, V3(ST.x, -.95, ST.z + 3.9), V3(ST.x, -1.0, ST.z));
+  underMode(t, 'clear', ss(seg(t, 41.7, 42.9)), 'deep', { focus: 3.9 });
+}, t => {
+  UI.pill('gedämpftes Licht', W / 2, 230 * S, seg(t, 41.9, 42.25) * (1 - seg(t, 43.4, 43.6)), { dot: '#8a96a8' });
+  UI.pill('keine Scheu', W / 2, 230 * S, seg(t, 43.6, 43.9), { dot: C.green });
+});
+
+// 12: pike, zander and perch feel the low coming and go into a feeding frenzy before the rain
+const FR = 50.3;
+shot(44.2, 52.1, t => {
+  only([perch, zander, pike, bait]);
+  const fr = seg(t, FR, FR + 1.2);
+  const pk = V3(lerp(ST.x - 4.2, ST.x - 1.6, eo(seg(t, 44.6, 46.0))) + fr * 1.6, -.75 + .05 * Math.sin(t), ST.z - .6); fishAt(pike, pk, -.08, 0, t); pike.material.userData.amp.value = fr > 0 && fr < 1 ? .14 : .05;
+  fishAt(zander, V3(ST.x + .6 - fr * 1.0, -.95 + .05 * Math.sin(t * .9), ST.z + .1), Math.PI - .1, 0, t); zander.material.userData.amp.value = fr > 0 && fr < 1 ? .13 : .05;
+  fishAt(perch, V3(ST.x + .1 + fr * .2, lerp(-1.1, -.7, fr), ST.z + .9), .3, -.3 * Math.sin(Math.PI * fr), t); perch.material.userData.amp.value = fr > 0 && fr < 1 ? .15 : .07;
+  const bc = V3(ST.x + .1, -.55, ST.z - .2); baitList.forEach((b, i) => { b.p.copy(bc).add(b.o).addScaledVector(b.d, eo(fr) * 1.2).add(V3(Math.sin(t * 1.3 + i) * .05, 0, 0)); b.yaw = (fr > 0 ? Math.atan2(-b.d.z, b.d.x) : 0) + Math.sin(t + i) * .2; }); placeSchool(bait);
+  const v = seg(t, 44.2, 52.1); lookFrom(cam, V3(ST.x - .2 + v * .4, -.75, ST.z + lerp(4.8, 4.3, v)), V3(ST.x - .2, -.85, ST.z));
+  underMode(t, 'deep', .55, 'open', { focus: 4.5 });
+}, t => {
+  pike.updateMatrixWorld(true); zander.updateMatrixWorld(true); perch.updateMatrixWorld(true); const ko = 1 - seg(t, 47.4, 47.6);
+  { const s = sp(pike.localToWorld(V3(.35, .05, 0))); UI.callout('Hecht', s.x, s.y, 0, -110, seg(t, 45.3, 45.65) * ko, { dot: C.green }); }
+  { const s = sp(zander.localToWorld(V3(.3, .05, 0))); UI.callout('Zander', s.x, s.y, 0, -150, seg(t, 45.95, 46.3) * ko, { dot: '#b9c0b0' }); }
+  { const s = sp(perch.localToWorld(V3(.2, .05, 0))); UI.callout('Barsch', s.x, s.y, 0, 110, seg(t, 46.5, 46.85) * ko, { dot: C.orange }); }
+  badge('T', W / 2 - 120 * S, 236 * S, seg(t, 47.5, 47.9) * (1 - seg(t, 49.6, 49.8)), '#b8433a', 34);
+  UI.pill('Tiefdruck naht', W / 2 + 40 * S, 236 * S, seg(t, 47.6, 47.95) * (1 - seg(t, 49.6, 49.8)), { dot: '#b8433a' });
+  rainRings(t, seg(t, 49.7, 50.4));
+  UI.pill('vor dem Regen', W / 2, 236 * S, seg(t, 49.8, 50.15) * (1 - seg(t, 50.9, 51.05)), { dot: C.blue });
+  bigWord('Fressrausch!', seg(t, 51.1, 52.3), 300);
+});
+
+// 13: if the sun still blazes: small lure, very slow, deep in the shade
+shot(52.1, 57.2, t => {
+  only([lure.wrap]); const v = seg(t, 52.1, 57.2), d = eio(seg(t, 52.4, 55.6));
+  const lx = lerp(5.6, 6.6, v), lz = 2; lure.wrap.position.set(lx, bed(lx, lz) + .12 + .02 * Math.sin(t * 2.2), lz); lure.wrap.rotation.set(0, 0, .05 * Math.sin(t * 2.2));
+  lookFrom(cam, V3(lerp(4.6, lx - .35, d), lerp(-1.0, bed(lx, lz) + .55, d), lerp(5.5, lz + 1.6, d)), V3(lx, lerp(-1.5, bed(lx, lz) + .12, d), lz));
+  underMode(t, 'clear', ss(seg(t, 53.6, 56.0)), 'deep', { focus: lerp(4, 1.7, d) });
+}, t => {
+  UI.pill('pralle Sonne', W / 2, 230 * S, seg(t, 52.4, 52.75) * (1 - seg(t, 54.1, 54.3)), { dot: C.orange });
+  UI.pill('kleiner Köder', W / 2, 230 * S, seg(t, 54.3, 54.65) * (1 - seg(t, 55.0, 55.2)), { dot: C.gold });
+  UI.pill('extrem langsam', W / 2, 230 * S, seg(t, 55.2, 55.55) * (1 - seg(t, 56.0, 56.2)), { dot: C.gold });
+  UI.pill('tief im Schatten', W / 2, 230 * S, seg(t, 56.2, 56.55), { dot: '#8a96a8' });
+});
+
+// 14: for the big ones: be on the water just before the storm breaks
+const BOLT = 61.45;
+shot(57.2, 65.8, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(t < 58.6 ? POSES.idle : castPose(t - 58.6), t);
+  const v = seg(t, 57.2, 62.3), P = spot.clone().add(V3(lerp(1.4, .5, eio(v)), lerp(1.6, 2.0, v), lerp(3.2, 4.8, eio(v))));
+  lookFrom(cam, P, spot.clone().add(V3(.6, 3.2, -12)));
+  lakeMode(t, 1, { drift: t * 6, focus: 5, aper: 3 });
+}, t => {
+  rain(g, t, seg(t, 57.2, 58.4) * .5 + seg(t, 60.6, 61.4) * .6, .2);
+  UI.fill('#e8eeff', flash(t, BOLT) * .75); bolt(t, BOLT, W * .3, 60 * S);
+  UI.pill('für Kapitale', W / 2, 230 * S, seg(t, 57.9, 58.25) * (1 - seg(t, 59.1, 59.3)), { dot: C.gold });
+  UI.pill('kurz vor dem Unwetter', W / 2, 230 * S, seg(t, 59.9, 60.25) * (1 - seg(t, 61.9, 62.2)), { dot: C.blue });
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 5.0: .4, 11.45: .45, 14.75: .4, 17.25: .4, 20.3: .35, 24.1: .3, 27.55: .35, 32.3: .45, 36.3: .4, 41.7: .4, 44.2: .35, 52.1: .4, 57.2: .45 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 65.8;
+window.render = t => { t += OFF;
+  UI.clear();
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 62.3, 8, [['Druck fällt?', 0]], [['Ab ans', 0], [' Wasser', 1], ['.', 0]], logo);
+};
+window.EV = [
+  { t: 1.3, type: 'tick' }, { t: 2.4, type: 'swish' }, { t: 3.45, type: 'tick' }, { t: 5.0, type: 'whoosh' }, { t: 7.2, type: 'ching' }, { t: 10.2, type: 'ding' },
+  { t: 11.45, type: 'whoosh' }, { t: 13.25, type: 'ding' }, { t: 14.75, type: 'cut' }, { t: 15.0, type: 'buzz', d: 1.8 }, { t: 17.25, type: 'dive' }, { t: 18.9, type: 'ding' },
+  { t: 20.3, type: 'whoosh' }, { t: 22.1, type: 'tick' }, { t: 24.1, type: 'whoosh' }, { t: 25.6, type: 'thud' }, { t: 27.55, type: 'whoosh' }, { t: 30.0, type: 'dart' }, { t: 31.3, type: 'tick' },
+  { t: 32.3, type: 'whoosh' }, { t: 32.75, type: 'ding' }, { t: 36.3, type: 'whoosh' }, { t: 37.8, type: 'gust' }, { t: 39.3, type: 'tick' }, { t: 41.7, type: 'dive' }, { t: 43.6, type: 'tick' },
+  { t: 44.2, type: 'whoosh' }, { t: 45.3, type: 'tick' }, { t: 45.95, type: 'tick' }, { t: 46.5, type: 'tick' }, { t: 47.5, type: 'ding' }, { t: FR, type: 'strike' }, { t: FR + .25, type: 'dart' }, { t: FR + .5, type: 'swirl' },
+  { t: 52.1, type: 'dive' }, { t: 57.2, type: 'whoosh' }, { t: 58.75, type: 'swish' }, { t: BOLT, type: 'thunder' }, { t: 62.3, type: 'whoosh' }, { t: 62.9, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>

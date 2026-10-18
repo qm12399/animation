@@ -9,7 +9,7 @@ Người dùng viết tiếng Việt, trả lời bằng tiếng Việt. Lời t
 1. `fischlogik/STYLEGUIDE.md`: chuẩn visual bắt buộc (màu, font, phụ đề, hook §5, thẻ tiêu đề §5b, âm thanh).
 2. `fischlogik/BRIEF.md`: khung hình, độ dài, những thứ phải giao.
 3. `fischlogik/SETUP.md`: cài đặt, lệnh sản xuất, các lỗi đã gặp.
-4. Tập gần nhất (`fischlogik/ep07/`): `index.html` là mẫu để copy, đọc `TREATMENT.md` để thấy cách chia cảnh.
+4. Tập gần nhất (`fischlogik/ep08/`): `index.html` là mẫu để copy, đọc `TREATMENT.md` để thấy cách chia cảnh.
 
 Không cần đọc lại toàn bộ engine. Chỉ mở file engine liên quan đến cảnh đang dựng (danh sách ở dưới).
 
@@ -38,7 +38,7 @@ Trong chat gửi: bản mp4 nén dưới 30 MB (`ffmpeg -crf 23`), file SRT, r�
 ## Quy trình một tập
 
 ```sh
-EP=fischlogik/ep08            # copy cấu trúc từ ep07
+EP=fischlogik/ep09            # copy cấu trúc từ tập gần nhất
 # 1. voice -> thời gian từng từ
 ffmpeg -i $EP/voice/voice.mp3 -ac 1 -ar 16000 $EP/voice/v16.wav
 $PY fischlogik/engine/transcribe.py $EP                       # -> voice/whisper_words.json
@@ -64,15 +64,16 @@ Sửa một đoạn hỏng mà không render lại cả tập: mở trang với 
 | `core.js` | renderer, `draw(scene, cam, {focus, aper, bloom, vig, sat, fade})`, hàm toán (seg, ss, eio, eo, keys, rng, V3), texture, `toScreen` |
 | `ui.js` | overlay 2D: karaoke, pill, callout, title, endCard, chapter, scoreCard, bigStat, arrow, swirl, grab/overlaySnap (dissolve) |
 | `lake.js` | hồ nhìn từ trên + ngang mặt nước, `shore()`, `PLACES` |
-| `under.js` | cảnh dưới nước, mode shallow/open/weeds/clear/deep/murky/night |
+| `under.js` | cảnh dưới nước, mode shallow/open/weeds/clear/deep/murky/night; `setMode(a, k, b)` blend a → b |
 | `section.js` | mặt cắt hồ (phân tầng nhiệt), mặt cắt bờ |
 | `river.js` | sông, trụ cầu, đá, kè |
 | `angler.js` | người câu cá với các pose (tung cần, đi bộ...) |
 | `fish.js` | barsch, hecht, rotauge, forelle, ukelei, zander; `makeFish`, `makeSchool` |
 | `lures.js` | 12 loại mồi, `makeLure(kind, scale, opts)` |
 | `pikejaw.js` | đầu cá chó cận cảnh có hàm mở + răng; `makeLeader` (fluoro/thick/steel) |
+| `weather.js` | `makeWeather(L).set(storm 0..1, t, sunPos)`: trời xanh có mặt trời → mây giông, gió gợn nước; `rain(g, t, k)`, `flash(t, t0)` cho mưa và sét |
 | `bird.js` | mòng biển |
-| `mix.py` | nhạc + ambience + sfx từ `events.json` và `audio.json`; sfx: swish plop dive whoosh cut thud dart gust tick ding gull swirl chug buzz ching reel strike snap saw |
+| `mix.py` | nhạc + ambience + sfx từ `events.json` và `audio.json`; sfx: swish plop dive whoosh cut thud dart gust tick ding gull swirl chug buzz ching reel strike snap saw thunder; bed: birds under wind creek river shop night rain |
 | `mux.sh` | ghép video + mix, loudnorm 2 lượt về -14 LUFS (dùng file này, không dùng core/render/mux.sh) |
 | `transcribe.py`, `srt.py` | Whisper small (de) → whisper_words.json; words.json → SRT giao kèm |
 

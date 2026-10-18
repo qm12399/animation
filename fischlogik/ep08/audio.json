@@ -1,0 +1,6 @@
+{
+  "voice": "voice/voice.mp3", "voice_at": 0.0,
+  "env": [[0, 14.9, "birds"], [14.6, 32.45, "under"], [32.2, 36.45, "birds"], [36.2, 41.85, "wind"], [41.6, 57.35, "under"], [57.1, 65.8, "rain"], [57.1, 65.8, "wind"]],
+  "silence": [],
+  "music_end": 62.0
+}

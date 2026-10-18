@@ -69,6 +69,7 @@ def bed(kind, d):
             k = np.arange(int(.25 * SR)) / SR; ch = np.sin(2 * np.pi * 4300 * k) * (np.sin(2 * np.pi * 40 * k) > 0) * np.sin(np.pi * k / .25) * .012
             i0 = int((k0 + rng.uniform(0, .3)) * SR); x[i0:i0 + len(ch)] += ch
         return x
+    if kind == 'rain': return hp(noise(d), 1800) * .022 + bp(noise(d), 300, 1400) * .02
     if kind == 'shop': return lp(hp(n, 200), 1500) * .012
     if kind == 'river': return bp(n, 200, 2600) * .07 * (1 + .25 * np.sin(2 * np.pi * .4 * t_(d))) + lp(n, 160) * .05
     if kind == 'creek': return (bp(n, 1200, 5000) * .03 * (1 + .4 * np.sin(2 * np.pi * 7 * t_(d)) * np.sin(2 * np.pi * 3.1 * t_(d))))
@@ -111,6 +112,9 @@ for e in ev['ev']:
     elif k == 'strike':
         put(fx, whoosh(.25, .8), at - .1, .45); put(fx, lp(noise(.3), 900) * np.exp(-t_(.3) * 14), at + .05, .7); put(fx, thump(.5, 90), at + .05, .4)
     elif k == 'tick': put(fx, click(1.4, .5), at, .3)
+    elif k == 'thunder':
+        tt = t_(4.0); crack = hp(noise(4.0), 1200) * np.exp(-tt * 9) * .5; roll = lp(noise(4.0), 160) * (np.exp(-tt * .9) * (1 + .5 * np.sin(2 * np.pi * 1.7 * tt))) * 2.2
+        put(fx, crack + roll, at, .9)
     elif k == 'snap':
         tt = t_(.4); put(fx, hp(noise(.4), 2500) * np.exp(-tt * 60) * .6 + np.sin(2 * np.pi * (2400 - 1600 * tt) * tt) * np.exp(-tt * 14) * .18, at, .55); put(fx, whoosh(.3, .4), at + .03, .2)
     elif k == 'saw':

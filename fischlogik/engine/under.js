@@ -82,11 +82,12 @@ export function buildUnder() {
   const murk = new THREE.Group(); for (let i = 0; i < 9; i++) { const m = new THREE.Mesh(new THREE.PlaneGeometry(70, 70), new THREE.MeshBasicMaterial({ color: 0x3a1c14, transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide })); m.rotation.x = -Math.PI / 2; m.position.set(20, -3.6 - i * .35, 0); murk.add(m); }
   scene.add(murk);
 
-  function setMode(mode, k = 1) {
-    const M = MODES[mode]; scene.fog.color.setHex(M.fog); scene.background.setHex(M.fog); scene.fog.near = M.near; scene.fog.far = M.far;
-    shaftM.opacity = .1 * M.shafts; bedM.userData.caus.value = M.caus;
-    const sf = M.surf || [.10, .26, .24]; surf.material.uniforms.uSurf.value.set(...sf); surf.material.uniforms.uGl.value = mode === 'night' ? .3 : 1;
-    shaftM.color.setHex(M.shaft || 0xffffff); hemi.intensity = 1.6 * (M.light ?? 1); sun.intensity = 1.6 * (M.light ?? 1);
+  function setMode(mode, k = 1, to) {   // with `to`: blend mode -> to by k
+    const A = MODES[mode], B = to ? MODES[to] : A, u = to ? k : 0, l = (x, y) => x + (y - x) * u;
+    scene.fog.color.setHex(A.fog).lerp(new THREE.Color(B.fog), u); scene.background.copy(scene.fog.color); scene.fog.near = l(A.near, B.near); scene.fog.far = l(A.far, B.far);
+    shaftM.opacity = .1 * l(A.shafts, B.shafts); bedM.userData.caus.value = l(A.caus, B.caus);
+    const sa = A.surf || [.10, .26, .24], sb = B.surf || [.10, .26, .24]; surf.material.uniforms.uSurf.value.set(l(sa[0], sb[0]), l(sa[1], sb[1]), l(sa[2], sb[2])); surf.material.uniforms.uGl.value = mode === 'night' ? .3 : 1;
+    shaftM.color.setHex(A.shaft || 0xffffff); const li = l(A.light ?? 1, B.light ?? 1); hemi.intensity = 1.6 * li; sun.intensity = 1.6 * li;
   }
   function update(t) {
     const pp = bubG.attributes.position;
