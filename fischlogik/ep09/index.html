@@ -1,0 +1,270 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng, glowPoints } from './engine/core.js';
+import { buildLake, shore, PLACES } from './engine/lake.js';
+import { makeAngler, POSES, castPose } from './engine/angler.js';
+import { makeFish } from './engine/fish.js';
+import { buildUnder, bedHeight } from './engine/under.js';
+import { buildSection } from './engine/section.js';
+import { makeLure } from './engine/lures.js';
+import { makeWeather, snow } from './engine/weather.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['Winter', 'sechs', 'Sommerködern', 'nichts', 'Grad', 'Oberfläche', 'vier', 'Dichte', 'unten', 'flachen', 'tiefsten', 'Löcher', 'Hafeneinfahrten', 'wechselwarm', 'Stoffwechsel', 'Kälte', 'Energie', 'Snack', 'Rechnung', 'größer', 'zwölf', 'sechzehn', 'Happen', 'Maulöffnen', 'schlanke', 'wilde', 'Pintails', 'Zeitlupe', 'Grund', 'Boden', 'fünf', 'liegen', 'schlaf', 'elf', 'fünfzehn', 'Mittagssonne', 'erwärmt']));
+
+// ---------------- worlds ----------------
+const L = buildLake(logo), A = makeAngler(logo); L.scene.add(A.root);
+const WX = makeWeather(L), U = buildUnder(), X = buildSection();
+const cam = new THREE.PerspectiveCamera(46, W / H, .02, 1200);
+const sp = p => toScreen(cam, p);
+const spot = shore(PLACES.bankTh, 2.4); spot.y = L.terrainHeight(spot.x, spot.z);
+const tiny = makeLure('gummifisch', .07); L.scene.add(tiny.wrap); tiny.wrap.frustumCulled = false;
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0) { f.position.copy(p); f.rotation.set(0, yaw, pitch); f.material.userData.phase.value = phase; }
+function lakeMode(t, storm, o = {}) {
+  TIME.value = t; WX.set(storm, t, o.sun); L.setReflect(o.refl ?? true); L.setFog(...(o.fog || [30, 220])); L.shadowFocus(...(o.shadow || [spot, 16])); L.fishGlow.visible = false;
+  L.water.material.uniforms.uMap.value = o.map ?? 0; L.water.material.uniforms.uWind.value = o.wind ?? .1;
+  draw(L.scene, cam, { focus: o.focus ?? 6, aper: o.aper ?? 3, vig: .45, bloom: .45, sat: o.sat ?? .6 });
+}
+function underMode(t, a = 'winter', k = 1, b, o = {}) { TIME.value = t; U.setMode(a, k, b); U.update(t); U.murk.visible = false; U.bubbles.visible = false; draw(U.scene, cam, { focus: o.focus ?? 3, aper: o.aper ?? 2.5, vig: .5, bloom: .45, sat: o.sat ?? .8 }); }
+
+// underwater actors
+const zander = makeFish('zander', .8), pike = makeFish('hecht', 1.3, { amp: .05, freq: 5 });
+const small = makeLure('gummifisch', .13), big = makeLure('gummifisch', .3), wild = makeLure('twister', .3);
+const ACT = [zander, pike, small.wrap, big.wrap, wild.wrap]; U.scene.add(...ACT); ACT.forEach(o => o.frustumCulled = false);
+const only = l => ACT.forEach(o => o.visible = l.includes(o));
+const bed = (x, z) => bedHeight(x, z);
+const DP = V3(6.4, bed(6.4, 2), 2);               // deep hole (bottom about -6.2)
+
+// map: fish glow that leaves the shallows for the deep centre and the harbour mouth
+const R = rng(4), fromP = [], toP = []; const dock = shore(PLACES.dockTh, -2.2).setY(.12);
+for (let i = 0; i < 46; i++) { const th = R() * 6.3; fromP.push(shore(th, -1 - R() * 2).setY(.12)); toP.push(i < 34 ? V3((R() - .5) * 7, .12, (R() - .5) * 9) : dock.clone().add(V3((R() - .5) * 3, 0, (R() - .5) * 3))); }
+const fg = glowPoints(fromP.map(p => p.clone()), 1.6, [1.6, 2.0, 2.4]); fg.frustumCulled = false; L.scene.add(fg);
+
+// ---------------- overlay helpers ----------------
+function therm(x, y, val, k, lo = -2, hi = 12) { if (k <= 0) return; const h = 150 * S, f = clamp((val - lo) / (hi - lo));
+  g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.roundRect(x - 34 * S, y - h / 2 - 22 * S, 68 * S, h + 82 * S, 30 * S); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.18)'; g.beginPath(); g.roundRect(x - 7 * S, y - h / 2, 14 * S, h, 7 * S); g.fill();
+  const col = val < 4.5 ? C.blue : val < 7 ? '#9fd0e8' : C.orange; g.fillStyle = col; g.beginPath(); g.roundRect(x - 7 * S, y + h / 2 - h * f, 14 * S, h * f, 7 * S); g.fill(); g.beginPath(); g.arc(x, y + h / 2 + 10 * S, 14 * S, 0, 7); g.fill();
+  g.fillStyle = '#fff'; g.font = `800 ${15 * S}px PJS`; g.textAlign = 'center'; g.fillText(`${val.toFixed(Math.abs(val - Math.round(val)) > .05 ? 1 : 0).replace('.', ',')} °C`, x, y + h / 2 + 50 * S); g.restore(); }
+function meter(label, x, y, p, k, col = C.gold, right) { if (k <= 0) return; const x0 = x - 150 * S;
+  g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.roundRect(x0 - 24 * S, y - 46 * S, 348 * S, 80 * S, 18 * S); g.fill();
+  g.fillStyle = '#fff'; g.font = `800 ${15 * S}px PJS`; g.textAlign = 'left'; g.fillText(label, x0, y - 14 * S); g.textAlign = 'right'; g.fillStyle = col; g.fillText(right ?? `${Math.round(p * 100)} %`, x0 + 300 * S, y - 14 * S);
+  g.fillStyle = 'rgba(255,255,255,.2)'; g.beginPath(); g.roundRect(x0, y + 2 * S, 300 * S, 12 * S, 6 * S); g.fill(); g.fillStyle = col; g.beginPath(); g.roundRect(x0, y + 2 * S, Math.max(12 * S, 300 * S * p), 12 * S, 6 * S); g.fill(); g.restore(); }
+function ruler(x, y, cmPx, k, marks) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 3); const w = 16 * cmPx;
+  g.fillStyle = 'rgba(240,226,190,.92)'; g.beginPath(); g.roundRect(x - 10 * S, y - 4 * S, w + 20 * S, 34 * S, 6 * S); g.fill();
+  g.strokeStyle = '#3a3226'; g.fillStyle = '#3a3226'; g.lineWidth = 1.5 * S; g.font = `700 ${10 * S}px PJS`; g.textAlign = 'center';
+  for (let c = 0; c <= 16; c++) { const xx = x + c * cmPx, l = c % 5 === 0 ? 14 : 8; g.beginPath(); g.moveTo(xx, y - 4 * S); g.lineTo(xx, y - 4 * S + l * S); g.stroke(); if (c % 2 === 0) g.fillText(c, xx, y + 24 * S); }
+  for (const [a, b, col] of marks) { g.fillStyle = col; g.globalAlpha = clamp(k * 3) * .55; g.fillRect(x + a * cmPx, y - 4 * S, (b - a) * cmPx, 6 * S); } g.restore(); }
+function timer(x, y, k, label, prog) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 5); g.fillStyle = C.pill; g.beginPath(); g.arc(x, y, 42 * S, 0, 7); g.fill();
+  g.strokeStyle = C.gold; g.lineWidth = 6 * S; g.lineCap = 'round'; g.beginPath(); g.arc(x, y, 33 * S, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(prog)); g.stroke();
+  g.fillStyle = '#fff'; g.font = `800 ${22 * S}px PJS`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, x, y + 1); g.restore(); }
+function hourBar(t, k, h) { if (k <= 0) return; const x0 = W / 2 - 230 * S, x1 = W / 2 + 230 * S, y = 236 * S, hx = v => lerp(x0, x1, (v - 6) / 12);
+  g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.roundRect(x0 - 30 * S, y - 50 * S, x1 - x0 + 60 * S, 96 * S, 20 * S); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.3)'; g.lineWidth = 6 * S; g.lineCap = 'round'; g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+  const kw = seg(t, 57.75, 58.6); if (kw > 0) { g.strokeStyle = C.gold; g.lineWidth = 10 * S; g.shadowColor = C.gold; g.shadowBlur = 14 * S; g.beginPath(); g.moveTo(hx(11), y); g.lineTo(lerp(hx(11), hx(15), eo(kw)), y); g.stroke(); g.shadowBlur = 0; }
+  g.font = `700 ${12 * S}px PJS`; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.8)'; for (const v of [6, 9, 11, 15, 18]) g.fillText(`${v}:00`, hx(v), y - 18 * S);
+  const kx = seg(t, 54.2, 54.5); if (kx > 0) { g.strokeStyle = C.red; g.lineWidth = 3 * S; g.globalAlpha = clamp(k * 3) * kx; g.beginPath(); g.moveTo(hx(6) - 9 * S, y - 9 * S); g.lineTo(hx(6) + 9 * S, y + 9 * S); g.moveTo(hx(6) + 9 * S, y - 9 * S); g.lineTo(hx(6) - 9 * S, y + 9 * S); g.stroke(); g.globalAlpha = clamp(k * 3); }
+  g.fillStyle = '#fff'; g.beginPath(); g.arc(hx(h), y, 8 * S, 0, 7); g.fill();
+  if (kw > 0) { g.globalAlpha = clamp(kw * 3); g.fillStyle = C.gold; g.font = `800 ${15 * S}px PJS`; g.fillText('Beißzeit', (hx(11) + hx(15)) / 2, y + 28 * S); } g.restore(); }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+
+// 1: hook. 6 a.m. in winter, snow, an angler with a tiny summer lure: nothing bites
+shot(0, 5.3, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(POSES.idle, t); A.root.updateMatrixWorld(true);
+  const tip = A.tipWorld(); tiny.wrap.visible = true; tiny.wrap.position.copy(tip).add(V3(0, -.35 + .02 * Math.sin(t * 2), 0)); tiny.wrap.rotation.set(0, .5 + .3 * Math.sin(t * .7), Math.PI / 2 - .2);
+  const u = eio(seg(t, 0, 4.2)), head = spot.clone().add(V3(0, 1.75, 0));
+  lookFrom(cam, head.clone().add(V3(lerp(.9, 2.6, u), lerp(.15, .9, u), lerp(1.1, 4.2, u))), head.clone().lerp(tip, .45).add(V3(0, -.2, -lerp(0, 2, u))));
+  lakeMode(t, .62, { sun: spot.clone().add(V3(200, -40, -300)), focus: lerp(1.4, 4.4, u), aper: 3.5, sat: .5 });
+}, t => {
+  UI.fill('#0a1a33', .28); snow(g, t, 1);
+  UI.pill('06:00 Uhr', W / 2 - 80 * S, 230 * S, seg(t, .9, 1.2), { dot: C.blue }); therm(W - 70 * S, 290 * S, 2, seg(t, 1.0, 1.3));
+  const s = sp(tiny.wrap.position); UI.callout('Sommerköder', s.x, s.y, -60, 90, seg(t, 2.3, 2.65) * (1 - seg(t, 3.9, 4.1)), { dot: C.gold });
+  UI.bigStat('0', 'Bisse', W / 2, 380 * S, seg(t, 4.1, 4.5));
+});
+
+// 2: below 6 degrees everything changes under the surface (+ title)
+shot(5.3, 9.6, t => {
+  tiny.wrap.visible = false; only([]); const u = seg(t, 5.3, 9.6);
+  lookFrom(cam, V3(ST().x, lerp(-.3, -.9, eio(u)), ST().z + 4), V3(ST().x + 2, lerp(-.6, -2.4, eio(u)), ST().z - 4));
+  underMode(t, 'winter', 1, null, { focus: 5 });
+}, t => {
+  UI.title(9, [['Im Winter', 0]], [['größer', 1], [' angeln.', 0]], seg(t, 5.4, 5.9) * (1 - seg(t, 8.0, 8.3)));
+  therm(W - 70 * S, 470 * S, lerp(8, 5.5, eio(seg(t, 6.1, 7.0))), seg(t, 5.9, 6.2) * (1 - seg(t, 9.2, 9.5)));
+  snow(g, t, 1 - seg(t, 5.3, 5.7));
+});
+function ST() { return V3(-3, -1.3, 3); }
+
+// 3: water is densest at 4 degrees and sinks (cross-section)
+shot(9.6, 14.1, t => {
+  TIME.value = t; X.update(t); const u = X.slabM.uniforms; u.uLayers.value = 0; u.uReveal.value = 0; u.uDead.value = 0; X.oxM.opacity = 0;
+  const v = seg(t, 9.6, 14.1); lookFrom(cam, V3(lerp(-.4, .3, v), lerp(-1.5, -2.2, v), lerp(17, 15.5, v)), V3(0, -2.6, 0));
+  draw(X.scene, cam, { vig: .42, bloom: .3, sat: .7 });
+}, t => {
+  const yS = sp(V3(0, 0, 0)).y, yB = sp(V3(0, -6.5, 0)).y, k = seg(t, 9.8, 10.3);
+  if (k > 0) { g.save(); g.globalAlpha = k; const gr = g.createLinearGradient(0, yS, 0, yB); gr.addColorStop(0, 'rgba(200,232,245,.35)'); gr.addColorStop(1, 'rgba(25,60,120,.55)'); g.fillStyle = gr; g.fillRect(0, yS, W, yB - yS);
+    g.fillStyle = 'rgba(235,246,252,.85)'; g.fillRect(0, yS - 4 * S, W, 9 * S); g.restore(); }
+  const r = rng(2); for (let i = 0; i < 30; i++) { const x = r() * W, ph = (t * .25 + r()) % 1, kk = seg(t, 12.7, 13.1); if (kk <= 0) break; g.save(); g.globalAlpha = kk * Math.sin(ph * Math.PI); g.fillStyle = '#8fc6ff'; g.beginPath(); g.arc(x, lerp(yS + 20 * S, yB - 10 * S, ph), 4 * S, 0, 7); g.fill(); g.restore(); }
+  { const s = { x: W * .26, y: yS + 40 * S }; UI.callout('0-3 °C', s.x, s.y, 0, 0, seg(t, 10.0, 10.3), { dot: '#d8f0ff' }); }
+  { const s = { x: W * .7, y: yB - 60 * S }; UI.callout('4 °C', s.x, s.y, 0, 0, seg(t, 10.6, 10.95), { dot: C.gold }); }
+  UI.pill('höchste Dichte', W / 2, 230 * S, seg(t, 11.9, 12.25) * (1 - seg(t, 12.75, 12.95)), { dot: C.gold });
+  UI.pill('sinkt nach unten', W / 2, 230 * S, seg(t, 12.9, 13.25), { dot: C.blue });
+  if (seg(t, 12.9, 13.3) > 0) { const x = W * .7; UI.arrow(x, yS + 60 * S, x, yB - 100 * S, seg(t, 12.9, 13.6), 'rgba(255,215,140,.95)', 5); }
+});
+
+// 4: fish leave the shallows for the deepest holes and calm harbour mouths (map)
+shot(14.1, 21.95, t => {
+  lookFrom(cam, keys([[14.1, V3(0, 80, 18)], [15.5, V3(0, 92, 3)], [21.95, V3(1, 84, 2)]], t, eio), V3(0, 0, 0), V3(0, 0, -1));
+  const m = eio(seg(t, 16.6, 19.6)), pp = fg.geometry.attributes.position; fromP.forEach((p, i) => { const q = p.clone().lerp(toP[i], clamp(m * 1.25 - (i % 5) * .06)); pp.setXYZ(i, q.x, q.y, q.z); }); pp.needsUpdate = true; fg.visible = true;
+  fg.material.opacity = .8 + .2 * Math.sin(t * 3);
+  lakeMode(t, .35, { refl: false, fog: [200, 900], shadow: [V3(), 70], focus: 1e6, aper: 0, map: seg(t, 14.4, 15.3) * .9, sat: .55 });
+}, t => {
+  { const s = sp(shore(PLACES.bankTh + .6, -1.5)); UI.callout('flaches Ufer', s.x, s.y, 20, -60, seg(t, 16.4, 16.75) * (1 - seg(t, 18.0, 18.2)), { dot: C.red }); }
+  { const s = sp(V3(0, .1, 0)); UI.callout('tiefstes Loch', s.x, s.y, 0, -110, seg(t, 18.6, 18.95), { dot: C.blue }); }
+  { const s = sp(dock); UI.callout('Hafeneinfahrt', s.x, s.y, -40, 80, seg(t, 20.5, 20.85), { dot: C.gold }); }
+  UI.pill('Fische ziehen ab', W / 2, 230 * S, seg(t, 16.6, 16.95), { dot: C.blue });
+});
+
+// 5: cold-blooded: metabolism shuts down in the cold
+shot(21.95, 26.55, t => {
+  only([zander]); zander.material.userData.amp.value = lerp(.04, .008, seg(t, 23.8, 25.5));
+  fishAt(zander, V3(DP.x, DP.y + .14 + .02 * Math.sin(t * .6), DP.z), .1, 0, t * .3);
+  const v = seg(t, 21.95, 26.55); lookFrom(cam, V3(DP.x + .05, DP.y + .45, DP.z + lerp(2.6, 2.1, v)), V3(DP.x + .05, DP.y + .15, DP.z));
+  underMode(t, 'winter', .5, 'deep', { focus: 2.3 });
+}, t => {
+  UI.pill('wechselwarm', W / 2, 230 * S, seg(t, 22.6, 22.95) * (1 - seg(t, 23.75, 23.95)), { dot: C.blue });
+  meter('Stoffwechsel', W / 2, 250 * S, lerp(1, .15, eio(seg(t, 24.3, 26.1))), seg(t, 23.95, 24.3), lerp(0, 1, seg(t, 24.3, 26.1)) > .5 ? C.blue : C.gold);
+  therm(W - 70 * S, 470 * S, 3, seg(t, 25.1, 25.4));
+});
+
+// 6: a pike or zander won't waste energy on a 5 cm snack
+shot(26.55, 34.35, t => {
+  only([zander, pike, small.wrap]); zander.material.userData.amp.value = .01; pike.material.userData.amp.value = .012;
+  fishAt(zander, V3(DP.x + .55, DP.y + .14, DP.z - .4), Math.PI - .15, 0, t * .3); fishAt(pike, V3(DP.x - .4, DP.y + .22, DP.z - .7), .15, 0, t * .3);
+  const lx = lerp(DP.x - 1.4, DP.x + 1.4, seg(t, 29.6, 33.6)); small.wrap.position.set(lx, DP.y + .55 + .03 * Math.sin(t * 7), DP.z + .9); small.wrap.rotation.set(0, 0, .1 * Math.sin(t * 7));
+  const v = seg(t, 26.55, 34.35); lookFrom(cam, V3(DP.x, DP.y + .7, DP.z + lerp(4.0, 3.6, v)), V3(DP.x, DP.y + .3, DP.z - .3));
+  underMode(t, 'winter', .5, 'deep', { focus: 3.4 });
+}, t => {
+  zander.updateMatrixWorld(true); pike.updateMatrixWorld(true);
+  { const s = sp(zander.localToWorld(V3(.3, .05, 0))); UI.callout('Zander', s.x, s.y, 10, -110, seg(t, 27.1, 27.45) * (1 - seg(t, 29.2, 29.4)), { dot: '#b9c0b0' }); }
+  { const s = sp(pike.localToWorld(V3(.35, .05, 0))); UI.callout('Hecht', s.x, s.y, -10, -150, seg(t, 27.8, 28.15) * (1 - seg(t, 29.2, 29.4)), { dot: C.green }); }
+  UI.pill('keine Energie', W / 2, 230 * S, seg(t, 29.3, 29.65) * (1 - seg(t, 30.3, 30.5)), { icon: 'x' });
+  { const s = sp(small.wrap.position); UI.callout('5 cm', s.x, s.y, 0, -70, seg(t, 30.4, 30.75) * (1 - seg(t, 32.4, 32.6)), { dot: C.gold }); }
+  UI.scoreCard('Rechnung', [['Jagd kostet Energie', false, seg(t, 32.7, 33.0)], ['5 cm bringen zu wenig', false, seg(t, 33.2, 33.5)]], seg(t, 32.55, 32.9));
+});
+
+// 7: one size up, 12-16 cm (ruler) ...
+shot(34.35, 38.8, t => {
+  only([small.wrap, big.wrap]); const c = V3(DP.x, DP.y + .55, DP.z);
+  small.wrap.position.copy(c).add(V3(-.08, .22, 0)); small.wrap.rotation.set(0, 0, .03 * Math.sin(t * 3));
+  big.wrap.position.copy(c).add(V3(0, -.05, 0)); big.wrap.rotation.set(0, 0, .03 * Math.sin(t * 3 + 1)); big.wrap.scale.setScalar(lerp(.1, .3, eo(seg(t, 34.9, 36.0))));
+  const v = seg(t, 34.35, 38.8); lookFrom(cam, c.clone().add(V3(0, .05, lerp(1.6, 1.45, v))), c.clone().add(V3(0, .05, 0)));
+  underMode(t, 'winter', .3, 'deep', { focus: 1.5, aper: 3 });
+}, t => {
+  UI.pill('eine Nummer größer', W / 2, 230 * S, seg(t, 35.3, 35.65) * (1 - seg(t, 36.5, 36.7)), { dot: C.gold });
+  ruler(W * .21, H * .58, 26 * S, seg(t, 36.5, 36.85), [[12, 16, C.gold]]);
+  UI.pill('12-16 cm', W / 2, 230 * S, seg(t, 36.8, 37.15), { dot: C.gold });
+});
+// ... a worthwhile bite worth opening the mouth for
+shot(38.8, 41.95, t => {
+  only([pike, big.wrap]); big.wrap.scale.setScalar(.3); const bite = 40.95;
+  const lp = V3(DP.x + .4 + .25 * (t - 38.8), DP.y + .5 + .03 * Math.sin(t * 3), DP.z); big.wrap.position.copy(lp); big.wrap.rotation.set(0, 0, .04 * Math.sin(t * 3)); big.wrap.visible = t < bite;
+  const pk = V3(lerp(DP.x - 1.6, lp.x - .55, eo(seg(t, 39.6, bite))), lerp(DP.y + .25, lp.y, seg(t, 39.6, bite)), DP.z); fishAt(pike, pk, 0, -.1 * Math.sin(Math.PI * seg(t, 39.6, bite + .3)), t); pike.material.userData.amp.value = t > 39.6 && t < bite + .4 ? .12 : .03;
+  lookFrom(cam, V3(DP.x + .15, DP.y + .65, DP.z + 2.9), V3(DP.x + .15, DP.y + .45, DP.z));
+  underMode(t, 'winter', .3, 'deep', { focus: 2.9 });
+}, t => {
+  UI.pill('lohnender Happen', W / 2, 230 * S, seg(t, 39.0, 39.35), { dot: C.green });
+});
+
+// 8: slim lures without wild action (pintails), slow motion right over the bottom
+shot(41.95, 45.55, t => {
+  only([wild.wrap, big.wrap]); const c = V3(DP.x, DP.y + .6, DP.z);
+  wild.wrap.position.copy(c).add(V3(-.05, .28, 0)); wild.wrap.rotation.set(Math.sin(t * 16) * .25, Math.sin(t * 9) * .3, Math.sin(t * 13) * .15); if (wild.tail) wild.tail.rotation.y = Math.sin(t * 22) * .9;
+  big.wrap.scale.setScalar(.3); big.wrap.position.copy(c).add(V3(-.05, -.18, 0)); big.wrap.rotation.set(0, 0, .02 * Math.sin(t * 2));
+  lookFrom(cam, c.clone().add(V3(0, -.15, 1.9)), c.clone().add(V3(0, -.15, 0)));
+  underMode(t, 'winter', .3, 'deep', { focus: 1.9, aper: 3 });
+}, t => {
+  { const s = sp(wild.wrap.position); UI.callout('wilde Aktion', s.x, s.y, -110, 50, seg(t, 44.3, 44.65), { dot: C.red }); }
+  { const s = sp(big.wrap.position); UI.callout('schlank', s.x, s.y, 0, 90, seg(t, 43.2, 43.55), { dot: C.green }); }
+  UI.pill('ohne wilde Aktion', W / 2, 230 * S, seg(t, 44.1, 44.45), { icon: 'x' });
+});
+shot(45.55, 50.0, t => {
+  only([big.wrap, zander]); big.wrap.scale.setScalar(.3); const v = seg(t, 45.55, 50.0);
+  const lx = lerp(DP.x - .9, DP.x + .5, v), lz = DP.z; big.wrap.position.set(lx, bed(lx, lz) + .14 + .04 * Math.max(0, Math.sin(t * 1.2)), lz); big.wrap.rotation.set(0, 0, .03 * Math.sin(t * 1.2));
+  zander.material.userData.amp.value = .015; fishAt(zander, V3(DP.x + 1.3, DP.y + .14, DP.z - .6), Math.PI + .3, 0, t * .3);
+  lookFrom(cam, V3(lx + .3, bed(lx, lz) + .55, lz + 2.4), V3(lx + .3, bed(lx, lz) + .2, lz));
+  underMode(t, 'winter', .4, 'deep', { focus: 2.4 });
+}, t => {
+  UI.pill('Pintail', W / 2, 230 * S, seg(t, 45.75, 46.1) * (1 - seg(t, 47.6, 47.8)), { dot: C.gold });
+  UI.pill('Zeitlupe', W / 2, 230 * S, seg(t, 47.85, 48.2) * (1 - seg(t, 48.85, 49.05)), { dot: C.blue });
+  UI.pill('direkt über den Grund', W / 2, 230 * S, seg(t, 48.9, 49.25), { dot: '#b9c0b0' });
+});
+
+// 9: let it lie on the bottom for five seconds
+const EAT = 53.6;
+shot(50.0, 53.9, t => {
+  only([big.wrap, zander]); big.wrap.scale.setScalar(.3); const lx = DP.x + .5, lz = DP.z;
+  big.wrap.position.set(lx, bed(lx, lz) + .1, lz); big.wrap.rotation.set(0, 0, -.05); big.wrap.visible = t < EAT;
+  const zp = V3(lerp(DP.x + 1.6, lx + .45, eo(seg(t, 51.2, EAT))), bed(lx, lz) + .16, lerp(DP.z - .5, lz, seg(t, 51.2, EAT))); fishAt(zander, zp, Math.PI, .1 * Math.sin(Math.PI * seg(t, 53.1, EAT + .2)), t * .4); zander.material.userData.amp.value = .02;
+  lookFrom(cam, V3(lx + .4, bed(lx, lz) + .5, lz + 2.3), V3(lx + .4, bed(lx, lz) + .15, lz));
+  underMode(t, 'winter', .4, 'deep', { focus: 2.3 });
+}, t => {
+  const n = 5 - Math.floor(clamp(t - 51.0, 0, 4.99)); timer(W / 2, 260 * S, seg(t, 50.8, 51.1) * (1 - seg(t, 53.5, 53.7)), `${n}`, seg(t, 51.0, 53.5));
+  UI.pill('liegen lassen', W / 2, 345 * S, seg(t, 52.8, 53.1) * (1 - seg(t, 53.5, 53.7)), { dot: C.gold });
+});
+
+// 10: sleep in: best bite time 11-15 h, when the midday sun warms the water a little
+shot(53.9, 66.0, t => {
+  A.root.position.copy(spot); A.root.rotation.y = 0; A.apply(t > 59.5 ? castPose(t - 59.5) : POSES.idle, t);
+  const v = seg(t, 53.9, 62.4), d = eio(seg(t, 54.6, 58.0));
+  lookFrom(cam, spot.clone().add(V3(lerp(1.4, 2.2, v), lerp(1.8, 2.4, v), lerp(4.2, 5.4, v))), spot.clone().add(V3(.4, lerp(2.4, 3.4, d), -12)));
+  lakeMode(t, lerp(.6, .25, d), { sun: spot.clone().add(V3(lerp(200, 90, d), lerp(-40, 120, d), -300)), focus: 5.5, aper: 2.5, sat: lerp(.5, .62, d) });
+}, t => {
+  UI.fill('#0a1a33', .28 * (1 - seg(t, 54.6, 56.5))); snow(g, t, 1 - seg(t, 54.6, 56.0));
+  UI.pill('ausschlafen', W / 2, 360 * S, seg(t, 54.4, 54.75) * (1 - seg(t, 55.9, 56.1)), { dot: C.green });
+  hourBar(t, seg(t, 54.0, 54.35) * (1 - seg(t, 61.8, 62.1)), lerp(6, 13, eio(seg(t, 54.6, 58.6))));
+  therm(W - 70 * S, 470 * S, lerp(3, 3.5, eio(seg(t, 60.9, 61.6))), seg(t, 60.4, 60.7) * (1 - seg(t, 61.9, 62.2)));
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 5.3: .45, 9.6: .4, 14.1: .4, 21.95: .45, 26.55: .35, 34.35: .35, 38.8: .3, 41.95: .35, 45.55: .3, 50.0: .3, 53.9: .45 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 66.0;
+window.render = t => { t += OFF;
+  UI.clear(); fg.visible = false; tiny.wrap.visible = false;
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 62.45, 9, [['Größer, langsamer,', 0]], [['mittags', 1], ['.', 0]], logo);
+};
+window.EV = [
+  { t: .9, type: 'tick' }, { t: 2.3, type: 'tick' }, { t: 4.1, type: 'ding' }, { t: 5.3, type: 'dive' }, { t: 6.1, type: 'tick' },
+  { t: 9.6, type: 'cut' }, { t: 10.0, type: 'tick' }, { t: 10.6, type: 'ding' }, { t: 12.9, type: 'whoosh' }, { t: 14.1, type: 'whoosh' }, { t: 16.6, type: 'swirl' }, { t: 18.6, type: 'tick' }, { t: 20.5, type: 'tick' },
+  { t: 21.95, type: 'dive' }, { t: 24.3, type: 'buzz', d: 1.6 }, { t: 26.55, type: 'whoosh' }, { t: 30.4, type: 'tick' }, { t: 32.7, type: 'tick' }, { t: 33.2, type: 'tick' },
+  { t: 34.35, type: 'whoosh' }, { t: 35.3, type: 'ching' }, { t: 36.5, type: 'tick' }, { t: 38.8, type: 'whoosh' }, { t: 40.95, type: 'strike' },
+  { t: 41.95, type: 'whoosh' }, { t: 44.1, type: 'tick' }, { t: 45.55, type: 'whoosh' }, { t: 47.85, type: 'swirl' },
+  { t: 50.0, type: 'whoosh' }, ...[51.0, 51.5, 52.0, 52.5, 53.0].map(t => ({ t, type: 'tick' })), { t: EAT, type: 'strike' },
+  { t: 53.9, type: 'whoosh' }, { t: 57.75, type: 'ding' }, { t: 59.6, type: 'swish' }, { t: 62.45, type: 'whoosh' }, { t: 63.05, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>

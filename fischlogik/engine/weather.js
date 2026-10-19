@@ -48,3 +48,10 @@ export function rain(g, t, k, slant = .18) {
 }
 // lightning: bright flash at t0 with a quick double flicker
 export const flash = (t, t0) => t < t0 ? 0 : Math.max(0, 1 - (t - t0) * 6) * .85 + (t - t0 > .12 && t - t0 < .2 ? .5 : 0);
+// 2D snow: soft flakes drifting down with sway
+export function snow(g, t, k, n = 120) {
+  if (k <= 0) return; const r = rng(11); g.save(); g.fillStyle = '#f4f8ff';
+  for (let i = 0; i < n; i++) { const sz = (1.2 + r() * 2.6) * S, sp = (40 + r() * 70) * S, x = (r() * W + Math.sin(t * (.6 + r()) + i) * 18 * S) % W, y = ((r() * H + t * sp) % (H + 20)) - 10;
+    g.globalAlpha = k * (.35 + r() * .5); g.beginPath(); g.arc(x, y, sz, 0, 7); g.fill(); }
+  g.restore();
+}

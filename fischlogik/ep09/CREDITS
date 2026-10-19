@@ -1,0 +1,8 @@
+Fischlogik · Folge 9 — credits
+
+Voice: supplied by the channel owner.
+Fonts: Plus Jakarta Sans, Playfair Display (SIL Open Font License 1.1), github.com/google/fonts
+3D: three.js r170 (MIT). Render, post and audio helpers: lemo-opuscar core (MIT), github.com/lemomo-ai/lemo-opuscar
+Word timings: faster-whisper (MIT), model "small".
+Music, ambience and sound effects: synthesised in engine/mix.py, original.
+All 3D models, textures and characters: made in code for this film.

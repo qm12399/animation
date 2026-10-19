@@ -14,6 +14,7 @@ export const MODES = {
   clear:   { fog: 0x3f7a70, near: 3, far: 30, shafts: 1.1, caus: 1.4, surf: [.16, .36, .33] },
   deep:    { fog: 0x14303a, near: 1, far: 12, shafts: .15, caus: .08, surf: [.05, .12, .13], light: .55 },
   murky:   { fog: 0x3a4630, near: .3, far: 6.5, shafts: .5, caus: 0, surf: [.12, .14, .08], shaft: 0xb48cff, light: .6 },
+  winter:  { fog: 0x2b4b58, near: 1.5, far: 17, shafts: .35, caus: .15, surf: [.16, .22, .26], light: .75 },
   night:   { fog: 0x08141c, near: 1, far: 11, shafts: 0, caus: 0, surf: [.07, .11, .15], light: .22 },
 };
 
