@@ -1,0 +1,255 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:PJS;src:url(engine/fonts/PlusJakartaSans.ttf);font-weight:200 900}
+@font-face{font-family:PF;src:url(engine/fonts/PlayfairItalic.ttf);font-style:italic;font-weight:400 900}
+html,body{margin:0;background:#000;overflow:hidden}canvas{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { THREE, V3, W, H, S, renderer, draw, TIME, clamp, lerp, seg, ss, eio, eo, ei, keys, toScreen, rng, glowPoints } from './engine/core.js';
+import { buildBeach, groundY, RIPX, GX, makeWorm, makeShrimp, makeCrab } from './engine/beach.js';
+import { makeAngler, POSES, castPose } from './engine/angler.js';
+import { makeFish } from './engine/fish.js';
+import * as UI from './engine/ui.js';
+const { C, g } = UI;
+
+const logo = new Image(); logo.src = 'engine/fonts/logo.png'; await logo.decode();
+await Promise.all([document.fonts.load('800 20px PJS'), document.fonts.load('italic 900 20px PF')]);
+const words = await (await fetch('voice/words.json')).json();
+UI.setWords(words, new Set(['Strand', 'hinweg', 'hinter', 'ersten', 'Welle', 'Karte', 'flach', 'Sandbank', 'Ufer', 'Graben', 'Rinne', 'dunklen', 'Wasserstreifen', 'Wattwürmer', 'Sandgarnelen', 'Strandkrabben', 'Flundern', 'Meerforellen', 'Wolfsbarsche', 'Futter', 'Kothäufchen', 'Naturköder', 'Lücke', 'keine', 'Rippströmung', 'Meer', 'Kanten', 'Steinbuhnen', 'Wellenbrecher', 'Magnete', 'Gewaltwurf', 'Horizont', 'Steinen']));
+
+// ---------------- world ----------------
+const B = buildBeach(), A = makeAngler(logo); B.scene.add(A.root);
+const cam = new THREE.PerspectiveCamera(46, W / H, .02, 1200);
+const sp = p => toScreen(cam, p);
+const AS = V3(0, groundY(0, 1.6), 1.6);
+function lookFrom(c, p, at, up = V3(0, 1, 0)) { c.position.copy(p); c.up.copy(up).normalize(); c.lookAt(at); c.updateMatrixWorld(); }
+function fishAt(f, p, yaw, pitch = 0, phase = 0, roll = 0) { f.position.copy(p); f.rotation.set(roll, yaw, pitch); f.material.userData.phase.value = phase; }
+function beach(t, o = {}) { TIME.value = t; B.setUnder(!!o.under); B.water.material.uniforms.uMap.value = o.map ?? 0; B.water.material.uniforms.uRip.value = o.rip ?? 0; B.shadowFocus(...(o.shadow || [AS, 14]));
+  draw(B.scene, cam, { focus: o.focus ?? 6, aper: o.aper ?? 2.5, vig: .4, bloom: o.under ? .3 : .12, thr: .95, sat: o.sat ?? 1, contrast: .04 }); }
+
+// fish markers in the first trough, predators at the rip edges, fish at the groyne
+const R = rng(6), troughPts = [], ripPts = [], groynePts = [];
+for (let i = 0; i < 22; i++) { const x = -10 + R() * 22; if (Math.abs(x - RIPX) < 3) continue; troughPts.push(V3(x, .1, -6 - R() * 2.4)); }
+for (let i = 0; i < 12; i++) { const s = i % 2 ? 1 : -1; ripPts.push(V3(RIPX + s * (3.2 + R() * .8), .1, -15 - R() * 6)); }
+for (let i = 0; i < 12; i++) groynePts.push(V3(GX + (i % 2 ? 1 : -1) * (1.6 + R() * 1.2), .1, -2 - R() * 13));
+const gTrough = glowPoints(troughPts, 1.5), gRip = glowPoints(ripPts, 1.6, [2.4, 1.2, .9]), gGroyne = glowPoints(groynePts, 1.5);
+[gTrough, gRip, gGroyne].forEach(o => { o.frustumCulled = false; B.scene.add(o); });
+
+// underwater critters + sea fish
+const crit = []; const CR = rng(12);
+for (let i = 0; i < 14; i++) { const kind = i % 3, m = kind === 0 ? makeWorm() : kind === 1 ? makeShrimp() : makeCrab(); m.frustumCulled = false; m.traverse(o => o.frustumCulled = false); B.scene.add(m);
+  crit.push({ m, kind, x: (CR() - .5) * .9, z0: -5.6 - CR() * .5, z1: -6.7 - CR() * .9, t0: 20.6 + kind * .9 + CR() * .9, ph: CR() * 6, spin: CR() * 4 }); }
+const flunder = makeFish('flunder', .42, { amp: .03, freq: 4 }), forelle = makeFish('meerforelle', .62), bass = makeFish('wolfsbarsch', .58);
+[flunder, forelle, bass].forEach(f => { f.frustumCulled = false; B.scene.add(f); });
+const UNDER = [...crit.map(c => c.m), flunder, forelle, bass];
+const onlyU = l => UNDER.forEach(o => o.visible = l.includes(o));
+
+// ---------------- overlay helpers ----------------
+function profile(t, k, hi) { if (k <= 0) return; const x0 = W / 2 - 230 * S, x1 = W / 2 + 230 * S, y0 = 188 * S, sc = 34 * S, dMax = 22, X = d => lerp(x0, x1, d / dMax), Y = h => y0 + 20 * S - h * sc;
+  g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.pill; g.beginPath(); g.roundRect(x0 - 24 * S, y0 - 32 * S, x1 - x0 + 48 * S, 140 * S, 18 * S); g.fill();
+  g.beginPath(); g.moveTo(X(0), Y(0)); for (let d = 0; d <= dMax; d += .25) g.lineTo(X(d), Y(groundY(-6, -d))); g.lineTo(X(dMax), Y(-2.6)); g.lineTo(X(0), Y(-2.6)); g.closePath();
+  g.fillStyle = 'rgba(80,150,160,.45)'; g.fillRect(X(0), Y(0), x1 - X(0), Y(-2.6) - Y(0)); g.fillStyle = '#d8c690'; g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 2 * S; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(x1, Y(0)); g.stroke();
+  const mark = (d, txt, kk, col) => { if (kk <= 0) return; g.globalAlpha = clamp(k * 3) * clamp(kk * 3); g.fillStyle = col; g.font = `800 ${13 * S}px PJS`; g.textAlign = 'center'; g.fillText(txt, X(d), y0 - 8 * S);
+    g.strokeStyle = col; g.lineWidth = 2 * S; g.setLineDash([3 * S, 3 * S]); g.beginPath(); g.moveTo(X(d), y0 - 2 * S); g.lineTo(X(d), Y(groundY(-6, -d)) - 3 * S); g.stroke(); g.setLineDash([]); };
+  mark(.6, 'Ufer', hi.ufer || 0, '#fff'); mark(15, 'Sandbank', hi.bank || 0, '#fff'); mark(7, '1. Rinne', hi.rinne || 0, C.gold);
+  g.globalAlpha = clamp(k * 3); g.fillStyle = 'rgba(255,255,255,.9)'; for (const d of [.6, 15]) { const kk = d < 1 ? hi.ufer || 0 : hi.bank || 0; if (kk <= 0) continue; for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(X(d) + (i - 1) * 9 * S, Y(0) - 3 * S + Math.sin(t * 6 + i) * 2 * S, 4 * S, Math.PI, 0); g.fill(); } }
+  g.restore(); }
+function lureDot(s, k) { if (k <= 0) return; g.save(); g.globalAlpha = k; g.fillStyle = '#fff6e0'; g.shadowColor = '#ffe9b0'; g.shadowBlur = 22 * S; g.beginPath(); g.arc(s.x, s.y, 6 * S, 0, 7); g.fill(); g.restore(); }
+function xMark(x, y, k, r = 16) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 3); g.fillStyle = C.red; g.beginPath(); g.arc(x, y, r * S, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 3 * S; const e = r * .45 * S;
+  g.beginPath(); g.moveTo(x - e, y - e); g.lineTo(x + e, y + e); g.moveTo(x + e, y - e); g.lineTo(x - e, y + e); g.stroke(); g.restore(); }
+function pin(n, x, y, k, label) { if (k <= 0) return; g.save(); g.globalAlpha = clamp(k * 3); const e = eo(clamp(k * 2)); g.translate(x, y - (1 - e) * 20 * S);
+  g.fillStyle = C.gold; g.beginPath(); g.arc(0, -26 * S, 16 * S, 0, 7); g.fill(); g.beginPath(); g.moveTo(-9 * S, -16 * S); g.lineTo(0, 0); g.lineTo(9 * S, -16 * S); g.fill();
+  g.fillStyle = '#1b2a38'; g.font = `800 ${16 * S}px PJS`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, 0, -25 * S); g.restore();
+  UI.pill(label, x, y - 64 * S, k, { dot: C.gold }); }
+// long cast arc from the angler's rod tip
+const FAR = V3(3, 0, -34), NEAR = V3(-1, 0, -7);
+function arc(a, b, h, u) { const p = a.clone().lerp(b, u); p.y += Math.sin(u * Math.PI) * h; return p; }
+
+// ---------------- shots ----------------
+const SHOTS = []; const shot = (t0, t1, r3, ov = () => {}) => SHOTS.push({ t0, t1, r3, ov });
+const L0 = .7, L1 = 2.9;
+let tip0 = null;
+function hideAll() { onlyU([]); gTrough.visible = gRip.visible = gGroyne.visible = false; A.root.visible = false; }
+
+// 1: hook. The cast sails far past the fish, which sit right behind the first wave
+shot(0, 6.2, t => {
+  hideAll(); A.root.visible = true; A.root.position.copy(AS); A.root.rotation.y = 0; A.apply(castPose(t - .04), t);
+  if (!tip0) { A.apply(castPose(.62)); A.root.updateMatrixWorld(true); tip0 = A.tipWorld().clone(); A.apply(castPose(t - .04), t); }
+  const lu = arc(tip0, FAR, 13, eo(seg(t, L0, L1)) * .4 + seg(t, L0, L1) * .6);
+  const P = keys([[0, AS.clone().add(V3(.5, 1.9, 3.4))], [1.2, AS.clone().add(V3(.4, 1.8, 3.2))], [2.6, V3(2, 9, 8)], [3.8, V3(1, 20, 10)], [6.2, V3(0, 24, 9)]], t, eio);
+  const at = AS.clone().add(V3(.9, 2.8, -10)).lerp(lu, ss(seg(t, .6, 1.4)) * (1 - ss(seg(t, 2.4, 3.6)))).lerp(V3(0, 0, -16), ss(seg(t, 2.6, 3.8)));
+  lookFrom(cam, P, at); gTrough.visible = t > 3.8; gTrough.material.opacity = seg(t, 3.9, 4.4) * (.8 + .2 * Math.sin(t * 3));
+  beach(t, { focus: P.y > 5 ? 1e6 : 5, aper: P.y > 5 ? 0 : 3, shadow: [V3(0, 0, -6), 26] });
+}, t => {
+  const k = seg(t, L0, L1);
+  if (t > L0 && t < 4.4) { const pts = []; for (let i = 0; i <= 40; i++) pts.push(arc(tip0, FAR, 13, eo(k * i / 40) * .4 + k * i / 40 * .6)); UI.dots(cam, pts, 1, { r: 2.6, glow: true, alpha: 1 - seg(t, 3.9, 4.4) }); if (k < 1) lureDot(sp(arc(tip0, FAR, 13, eo(k) * .4 + k * .6)), 1); }
+  const kr = seg(t, L1, L1 + .8); if (kr > 0 && kr < 1) UI.ring(cam, FAR, .5 + kr * 3, 1 - kr, 'rgba(255,255,255,.9)', { n: 30 });
+  { const s = sp(FAR); xMark(s.x, s.y, seg(t, 3.0, 3.3) * (1 - seg(t, 5.6, 5.9))); UI.callout('zu weit', s.x, s.y, 0, -70, seg(t, 3.1, 3.45) * (1 - seg(t, 5.6, 5.9)), { dot: C.red }); }
+  { const s = sp(NEAR); UI.callout('hier stehen sie', s.x, s.y, 0, 110, seg(t, 4.3, 4.65) * (1 - seg(t, 5.8, 6.1)), { dot: C.gold }); }
+});
+
+// 2: every beach hides a map (+ title)
+shot(6.2, 9.0, t => {
+  hideAll(); A.root.visible = true; A.root.position.copy(AS); A.apply(POSES.idle, t);
+  lookFrom(cam, keys([[6.2, V3(0, 24, 9)], [7.6, V3(0, 60, -10)], [9.0, V3(0, 64, -12)]], t, eio), V3(0, 0, -13), V3(0, 0, -1));
+  beach(t, { focus: 1e6, aper: 0, shadow: [V3(0, 0, -10), 40] });
+}, t => {
+  UI.title(10, [['Fische stehen', 0]], [['näher', 1], [' als du denkst.', 0]], seg(t, 6.0, 6.5) * (1 - seg(t, 8.5, 8.8)));
+  const k = seg(t, 8.3, 8.8); if (k > 0) { g.save(); g.globalAlpha = k * .35; g.strokeStyle = '#fff'; g.lineWidth = 1 * S; g.setLineDash([4 * S, 6 * S]); for (let i = 1; i < 6; i++) { g.beginPath(); g.moveTo(W * i / 6, 0); g.lineTo(W * i / 6, H); g.stroke(); } for (let i = 1; i < 10; i++) { g.beginPath(); g.moveTo(0, H * i / 10); g.lineTo(W, H * i / 10); g.stroke(); } g.restore(); }
+});
+
+// 3: waves break where the water gets shallow: out on the sandbar, then right at the shore
+shot(9.0, 14.45, t => {
+  hideAll(); A.root.position.copy(AS); A.apply(POSES.idle, t); const v = seg(t, 9.0, 14.45);
+  lookFrom(cam, V3(lerp(4, 2, v), lerp(2.6, 3.2, v), lerp(7, 5.5, v)), V3(-1, 0, -15));
+  beach(t, { focus: 12, aper: 1, shadow: [V3(0, 0, -4), 20] });
+}, t => {
+  profile(t, seg(t, 9.3, 9.7), { bank: seg(t, 12.4, 12.8), ufer: seg(t, 13.8, 14.2) });
+  { const s = sp(V3(-2, .1, -15)); UI.callout('Sandbank', s.x, s.y, 0, -70, seg(t, 12.5, 12.85), { dot: '#fff' }); }
+  { const s = sp(V3(-.5, .05, -.4)); UI.callout('Ufer', s.x, s.y, -40, -60, seg(t, 13.9, 14.25), { dot: '#fff' }); }
+});
+
+// 4: in between runs a deeper trench, the first trough: a dark stripe from above
+shot(14.45, 20.05, t => {
+  hideAll(); const v = seg(t, 14.45, 20.05);
+  lookFrom(cam, keys([[14.45, V3(3, 9, 6)], [16.0, V3(-2, 34, 4)], [20.05, V3(-1, 38, 2)]], t, eio), V3(0, 0, -8));
+  beach(t, { focus: 1e6, aper: 0, map: ss(seg(t, 17.5, 18.8)) * .9, shadow: [V3(0, 0, -8), 30] });
+}, t => {
+  profile(t, 1 - seg(t, 19.6, 19.9), { bank: 1, ufer: 1, rinne: seg(t, 16.5, 16.9) });
+  { const s = sp(V3(-3, .1, -7)); UI.callout('1. Rinne', s.x, s.y, -30, 90, seg(t, 16.7, 17.05), { dot: C.gold }); }
+  UI.pill('dunkler Streifen', W / 2, 400 * S, seg(t, 18.9, 19.25), { dot: '#1d4e63' });
+});
+
+// 5: every breaking wave washes lugworms, sand shrimps and shore crabs out: all of it lands in the trough
+shot(20.05, 25.9, t => {
+  hideAll(); onlyU(crit.map(c => c.m));
+  crit.forEach(c => { const u = seg(t, c.t0, c.t0 + 2.6), x = c.x + Math.sin(t * 1.3 + c.ph) * .05 * (1 - u), z = lerp(c.z0, c.z1, eio(u)), bot = groundY(x, z) + .03;
+    const lift = Math.sin(Math.PI * clamp(u * 1.15)) * .35; c.m.position.set(x, t < c.t0 ? groundY(x, c.z0) - .06 : bot + lift, z);
+    c.m.rotation.set(c.kind === 2 ? 0 : Math.sin(t * 3 + c.ph) * .6 * (1 - u), c.ph + t * c.spin * (1 - u), c.kind === 2 ? Math.sin(t * 4 + c.ph) * .4 * (1 - u) : 0); });
+  const v = seg(t, 20.05, 25.9); lookFrom(cam, V3(lerp(.1, -.1, v), -.62, lerp(-5.0, -5.15, v)), V3(0, -1.2, -6.8));
+  beach(t, { under: true, focus: 1.8, aper: 3, sat: .95 });
+}, t => {
+  const near = kind => { const c = crit.find(c => c.kind === kind && t > c.t0); return c && sp(c.m.position); };
+  { const s = near(0); if (s) UI.callout('Wattwurm', s.x, s.y, -50, -90, seg(t, 21.25, 21.6) * (1 - seg(t, 24.1, 24.3)), { dot: '#e08a80' }); }
+  { const s = near(1); if (s) UI.callout('Sandgarnele', s.x, s.y, 40, -130, seg(t, 22.2, 22.55) * (1 - seg(t, 24.1, 24.3)), { dot: '#e8dcc0' }); }
+  { const s = near(2); if (s) UI.callout('Strandkrabbe', s.x, s.y, 30, 100, seg(t, 23.0, 23.35) * (1 - seg(t, 24.1, 24.3)), { dot: C.orange }); }
+  UI.pill('alles landet in der Rinne', W / 2, 230 * S, seg(t, 24.35, 24.7), { dot: C.gold });
+});
+
+// 6: flounders, sea trout and sea bass patrol the trough and pick up the food
+shot(25.9, 30.45, t => {
+  hideAll(); onlyU([flunder, forelle, bass, ...crit.slice(0, 6).map(c => c.m)]);
+  crit.slice(0, 6).forEach((c, i) => c.m.position.set(-.8 + i * .32, groundY(0, -7) + .03, -6.9 - (i % 2) * .3));
+  const v = seg(t, 25.9, 30.45);
+  fishAt(flunder, V3(lerp(-.35, -.05, v), groundY(0, -6.9) + .05, -6.9), .3, 0, t, Math.PI / 2);
+  fishAt(forelle, V3(lerp(-.7, .6, v), -.85 + .05 * Math.sin(t), -7.4), 0, 0, t);
+  fishAt(bass, V3(lerp(.9, -.5, seg(t, 26.6, 30.45)), -1.05 + .04 * Math.sin(t * 1.2), -8.3), Math.PI, 0, t);
+  lookFrom(cam, V3(0, -.42, -4.6), V3(0, -1.0, -7.6));
+  beach(t, { under: true, focus: 3, aper: 2.5, sat: .95 });
+}, t => {
+  flunder.updateMatrixWorld(true); forelle.updateMatrixWorld(true); bass.updateMatrixWorld(true);
+  { const s = sp(flunder.position); UI.callout('Flunder', s.x, s.y, 30, 90, seg(t, 26.85, 27.2), { dot: '#b8a070' }); }
+  { const s = sp(forelle.localToWorld(V3(.25, .05, 0))); UI.callout('Meerforelle', s.x, s.y, 0, -110, seg(t, 27.3, 27.65), { dot: '#c8d0d6' }); }
+  { const s = sp(bass.localToWorld(V3(.25, .05, 0))); UI.callout('Wolfsbarsch', s.x, s.y, 0, -170, seg(t, 28.0, 28.35), { dot: '#9aa4aa' }); }
+  UI.pill('sammeln Futter', W / 2, 230 * S, seg(t, 29.4, 29.75), { dot: C.green });
+});
+
+// 7: little worm casts on the wet sand: the lugworm sits right there, your best natural bait
+shot(30.45, 35.55, t => {
+  hideAll(); A.root.position.copy(AS); A.apply(POSES.idle, t); const v = seg(t, 30.45, 35.55);
+  lookFrom(cam, V3(lerp(1.6, 1.1, v), lerp(.75, .55, v), lerp(3.4, 2.9, v)), V3(.2, 0, 1.3));
+  beach(t, { focus: 1.9, aper: 4, shadow: [V3(0, 0, 1.4), 4] });
+}, t => {
+  const cst = B.casts.reduce((b, c) => (Math.hypot(c.p.x - .3, c.p.z - 1.4) < Math.hypot(b.p.x - .3, b.p.z - 1.4) ? c : b)); const s = sp(cst.p);
+  UI.callout('Kothäufchen', s.x, s.y, -40, -110, seg(t, 31.1, 31.45) * (1 - seg(t, 32.6, 32.8)), { dot: '#d8c690' });
+  const kx = seg(t, 32.75, 33.2); if (kx > 0) { const cx = s.x, cy = s.y + 120 * S; g.save(); g.globalAlpha = kx; g.fillStyle = 'rgba(70,52,30,.85)'; g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 2 * S; g.beginPath(); g.ellipse(cx, cy, 120 * S, 90 * S, 0, 0, 7); g.fill(); g.stroke();
+    g.setLineDash([4 * S, 4 * S]); g.strokeStyle = 'rgba(230,210,170,.7)'; g.beginPath(); g.moveTo(cx - 50 * S, cy - 90 * S); g.quadraticCurveTo(cx - 50 * S, cy + 60 * S, cx, cy + 60 * S); g.quadraticCurveTo(cx + 50 * S, cy + 60 * S, cx + 50 * S, cy - 90 * S); g.stroke(); g.setLineDash([]);
+    g.strokeStyle = '#e07a74'; g.lineWidth = 9 * S; g.lineCap = 'round'; g.beginPath(); const w = Math.sin(t * 3) * 6 * S; g.moveTo(cx - 48 * S, cy - 10 * S); g.quadraticCurveTo(cx - 44 * S + w, cy + 52 * S, cx + 10 * S, cy + 54 * S); g.stroke(); g.restore();
+    UI.callout('Wattwurm', cx + 10 * S, cy + 54 * S, 70, 60, seg(t, 33.4, 33.75), { dot: '#e08a80' }); }
+  UI.pill('bester Naturköder', W / 2, 230 * S, seg(t, 34.5, 34.85), { dot: C.gold });
+});
+
+// 8: look for a gap where no waves break: that calm spot is a rip current
+const GAP = V3(RIPX, 0, -15);
+shot(35.55, 41.15, t => {
+  hideAll(); lookFrom(cam, keys([[35.55, V3(RIPX - 6, 14, 4)], [37.0, V3(RIPX - 3, 26, 2)], [41.15, V3(RIPX - 2, 28, 0)]], t, eio), V3(RIPX, 0, -13));
+  beach(t, { focus: 1e6, aper: 0, shadow: [GAP, 30] });
+}, t => {
+  UI.ring(cam, GAP.clone().setY(.1), 4.5, seg(t, 36.8, 37.5), 'rgba(255,255,255,.9)', { n: 40, dot: 2.6 });
+  { const s = sp(GAP); UI.callout('Lücke', s.x, s.y, 0, -120, seg(t, 36.9, 37.25) * (1 - seg(t, 38.9, 39.1)), { dot: '#fff' }); }
+  UI.pill('keine Wellen', W / 2, 230 * S, seg(t, 38.0, 38.35) * (1 - seg(t, 39.9, 40.1)), { icon: 'x' });
+  UI.pill('Rippströmung', W / 2, 230 * S, seg(t, 40.2, 40.55), { dot: C.red });
+});
+
+// 9: the water flowing back drags food out to sea; predators wait on the edges of the current
+shot(41.15, 47.0, t => {
+  hideAll(); lookFrom(cam, V3(RIPX - 2 + seg(t, 41.15, 47) * 1.5, 28, 0), V3(RIPX, 0, -13));
+  gRip.visible = t > 44.4; gRip.material.opacity = seg(t, 44.5, 45.0) * (.8 + .2 * Math.sin(t * 3));
+  beach(t, { focus: 1e6, aper: 0, rip: seg(t, 41.2, 41.8), shadow: [GAP, 30] });
+}, t => {
+  const ka = seg(t, 41.3, 41.8); for (let i = 0; i < 3; i++) { const ph = (t * .5 + i / 3) % 1, a = sp(V3(RIPX, .1, -6 - ph * 12)), b = sp(V3(RIPX, .1, -8 - ph * 12)); UI.arrow(a.x, a.y, b.x, b.y, ka * Math.sin(Math.PI * ph), 'rgba(255,255,255,.95)', 5); }
+  const r = rng(5), kf = seg(t, 42.6, 43.0); for (let i = 0; i < 18; i++) { const ph = (t * .28 + r()) % 1, s = sp(V3(RIPX + (r() - .5) * 2.4, .1, -6 - ph * 16)); g.save(); g.globalAlpha = kf * Math.sin(Math.PI * ph); g.fillStyle = '#ffd99a'; g.beginPath(); g.arc(s.x, s.y, 3.5 * S, 0, 7); g.fill(); g.restore(); }
+  UI.pill('Nahrung ins Meer', W / 2, 230 * S, seg(t, 42.7, 43.05) * (1 - seg(t, 44.4, 44.6)), { dot: '#ffd99a' });
+  { const s = sp(V3(RIPX - 3.6, .1, -18)); UI.callout('Kante', s.x, s.y, -50, -60, seg(t, 45.7, 46.05), { dot: C.red }); }
+  { const s = sp(V3(RIPX + 3.6, .1, -18)); UI.callout('Kante', s.x, s.y, 50, -60, seg(t, 45.8, 46.15), { dot: C.red }); }
+  UI.pill('Raubfische lauern', W / 2, 230 * S, seg(t, 44.6, 44.95), { dot: C.red });
+});
+
+// 10: stone groynes and breakwaters are real magnets
+shot(47.0, 49.95, t => {
+  hideAll(); const v = seg(t, 47.0, 49.95); lookFrom(cam, V3(GX + lerp(9, 7, v), lerp(5, 6.5, v), lerp(4, 2, v)), V3(GX, 0, -7));
+  gGroyne.visible = t > 47.9; gGroyne.material.opacity = seg(t, 48.0, 48.5) * (.8 + .2 * Math.sin(t * 3));
+  beach(t, { focus: 12, aper: 1, shadow: [V3(GX, 0, -5), 16] });
+}, t => {
+  UI.pill('Steinbuhne', W / 2, 230 * S, seg(t, 47.25, 47.6) * (1 - seg(t, 48.9, 49.1)), { dot: '#9a958c' });
+  UI.pill('echter Magnet', W / 2, 230 * S, seg(t, 49.1, 49.45), { dot: C.gold });
+});
+
+// 11: skip the big cast to the horizon: fish the trough, the rip and the stones
+shot(49.95, 60.0, t => {
+  hideAll(); A.root.visible = true; A.root.position.copy(AS); A.root.rotation.y = 0; A.apply(t < 50.4 ? POSES.idle : castPose(t - 50.4), t);
+  gTrough.visible = gRip.visible = gGroyne.visible = t > 52; [gTrough, gRip, gGroyne].forEach(o => o.material.opacity = .9);
+  const P = keys([[49.95, AS.clone().add(V3(1.4, 2.2, 4.4))], [51.6, AS.clone().add(V3(1.2, 2.6, 5.2))], [52.6, V3(-4, 96, 2)], [56.4, V3(-4, 102, 0)]], t, eio);
+  lookFrom(cam, P, AS.clone().add(V3(.4, 2.4, -12)).lerp(V3(-4, 0, -11), ss(seg(t, 51.8, 52.8))), V3(0, 1 - ss(seg(t, 51.8, 52.8)), -ss(seg(t, 51.8, 52.8))));
+  beach(t, { focus: P.y > 6 ? 1e6 : 5, aper: P.y > 6 ? 0 : 3, map: seg(t, 52.2, 52.8) * .6, shadow: [V3(-3, 0, -8), 40] });
+}, t => {
+  if (t < 52) { A.apply(castPose(.62)); A.root.updateMatrixWorld(true); const tp = A.tipWorld().clone(); A.apply(t < 50.4 ? POSES.idle : castPose(t - 50.4), t);
+    const pts = []; for (let i = 0; i <= 40; i++) pts.push(arc(tp, V3(2, 0, -90), 30, i / 40)); UI.dots(cam, pts, seg(t, 50.3, 51.1), { r: 2.4, alpha: 1 - seg(t, 51.6, 51.9) });
+    xMark(W / 2, 330 * S, seg(t, 51.1, 51.4) * (1 - seg(t, 51.6, 51.9)), 22); }
+  { const s = sp(V3(-3, .1, -7)); pin('1', s.x, s.y, seg(t, 53.35, 53.7), '1. Rinne'); }
+  { const s = sp(GAP); pin('2', s.x, s.y, seg(t, 54.1, 54.45), 'Rippströmung'); }
+  { const s = sp(V3(GX, .1, -6)); pin('3', s.x, s.y, seg(t, 55.6, 55.95), 'Steine'); }
+});
+
+// ---------------- dispatcher ----------------
+const DISS = { 6.2: .3, 9.0: .45, 14.45: .4, 20.05: .45, 25.9: .35, 30.45: .45, 35.55: .45, 41.15: .2, 47.0: .45, 49.95: .45 };
+const glc = renderer.domElement;
+const Q = new URLSearchParams(location.search), OFF = +(Q.get('off') || 0);
+window.DUR = Q.get('dur') ? +Q.get('dur') : 60.0;
+window.render = t => { t += OFF;
+  UI.clear();
+  const i = SHOTS.findIndex(s => t >= s.t0 && t < s.t1), s = SHOTS[i < 0 ? SHOTS.length - 1 : i];
+  const d = DISS[s.t0], prev = SHOTS[i - 1];
+  if (d && prev && t < s.t0 + d / 2) { prev.r3(t); UI.grab(glc); s.r3(t); UI.overlaySnap(1 - ss((t - (s.t0 - d / 2)) / d)); }
+  else { const nx = SHOTS[i + 1], dn = nx && DISS[nx.t0];
+    if (dn && t > nx.t0 - dn / 2) { s.r3(t); UI.grab(glc); nx.r3(t); UI.clear(); UI.overlaySnap(1 - ss((t - (nx.t0 - dn / 2)) / dn)); } else s.r3(t); }
+  s.ov(t);
+  UI.karaoke(t);
+  UI.endCard(t, 56.4, 10, [['Kurz werfen,', 0]], [['mehr', 1], [' fangen.', 0]], logo);
+};
+window.EV = [
+  { t: .3, type: 'gull' }, { t: 9.6, type: 'gull' }, { t: 31.4, type: 'gull' }, { t: 47.4, type: 'gull' },
+  { t: .55, type: 'swish' }, { t: L1, type: 'plop' }, { t: 3.0, type: 'tick' }, { t: 4.3, type: 'ding' }, { t: 6.2, type: 'whoosh' }, { t: 8.3, type: 'tick' },
+  { t: 9.0, type: 'whoosh' }, { t: 12.4, type: 'tick' }, { t: 13.8, type: 'tick' }, { t: 14.45, type: 'whoosh' }, { t: 16.6, type: 'ding' }, { t: 18.9, type: 'tick' },
+  { t: 20.05, type: 'dive' }, { t: 20.7, type: 'swirl' }, { t: 21.25, type: 'tick' }, { t: 22.2, type: 'tick' }, { t: 23.0, type: 'tick' }, { t: 24.35, type: 'ding' },
+  { t: 25.9, type: 'whoosh' }, { t: 26.85, type: 'tick' }, { t: 27.3, type: 'tick' }, { t: 28.0, type: 'tick' }, { t: 30.45, type: 'whoosh' }, { t: 31.1, type: 'tick' }, { t: 32.75, type: 'ding' }, { t: 34.5, type: 'ching' },
+  { t: 35.55, type: 'whoosh' }, { t: 36.8, type: 'tick' }, { t: 40.2, type: 'ding' }, { t: 41.3, type: 'swirl' }, { t: 44.6, type: 'tick' }, { t: 45.7, type: 'tick' },
+  { t: 47.0, type: 'whoosh' }, { t: 49.1, type: 'ding' }, { t: 49.95, type: 'whoosh' }, { t: 50.45, type: 'swish' }, { t: 51.1, type: 'tick' }, { t: 53.35, type: 'ding' }, { t: 54.1, type: 'ding' }, { t: 55.6, type: 'ding' }, { t: 56.4, type: 'whoosh' }, { t: 57.0, type: 'ding' },
+];
+window.READY = true;
+</script>
+</body></html>

@@ -9,6 +9,10 @@ const SPEC = {
   forelle: { prof: [0, .06, .085, .12, .15, .165, .16, .145, .115, .07, .01], flat: .55, back: 0x4a5a34, belly: 0xe6e2d2, side: 0xb8b8a0, pattern: 'trout', fin: 0x8a8060, len: 1 },
   ukelei: { prof: [0, .045, .065, .09, .11, .12, .115, .1, .08, .05, 0], flat: .45, back: 0x4f6a78, belly: 0xf2f4f6, side: 0xd4dce2, pattern: 'none', fin: 0xb9c2c6, len: 1 },
   zander: { prof: [0, .06, .085, .11, .135, .145, .14, .125, .1, .065, .02], flat: .6, back: 0x4a5048, belly: 0xdcdccc, side: 0x8a9080, pattern: 'saddle', fin: 0x8a8a78, dorsalSpiky: true, len: 1 },
+  // sea fish (Folge 10). flunder: lay it flat with rotation.x = PI/2
+  flunder: { prof: [0, .1, .2, .28, .33, .35, .34, .3, .22, .12, 0], flat: .2, back: 0x6a5a3e, belly: 0x7a6a4a, side: 0x7d6c4a, pattern: 'spots', fin: 0x6a5a3e, len: 1 },
+  meerforelle: { prof: [0, .06, .085, .12, .15, .16, .155, .14, .11, .07, .01], flat: .55, back: 0x4a5a66, belly: 0xf0f2f2, side: 0xc8d0d6, pattern: 'trout', fin: 0x8a949a, len: 1 },
+  wolfsbarsch: { prof: [0, .06, .085, .12, .15, .16, .155, .135, .1, .06, .01], flat: .55, back: 0x52606a, belly: 0xf2f4f4, side: 0xb8c4cc, pattern: 'none', fin: 0x9aa4aa, dorsalSpiky: true, len: 1 },
   rotauge: { prof: [0, .07, .11, .17, .2, .21, .2, .17, .12, .06, 0], flat: .45, back: 0x34485a, belly: 0xe8ecef, side: 0xb9c3c8, pattern: 'none', fin: 0xc8452e, len: 1 },
 };
 
@@ -30,7 +34,7 @@ export function fishGeometry(kind) {
     col.copy(side).lerp(back, Math.max(0, up)).lerp(belly, Math.max(0, -up) * .9);
     if (sp.pattern === 'bars' && up > -.3 && Math.sin(x * 38) > .45 && x > .15 && x < .8) col.multiplyScalar(.45);
     if (sp.pattern === 'spots' && up > -.4) { const h = Math.sin(x * 91 + up * 17) * Math.sin(x * 57 - z * 40); if (h > .55) col.lerp(new THREE.Color(0xd8d49a), .7); }
-    if (sp.pattern === 'trout') { if (Math.abs(up) < .18) col.lerp(new THREE.Color(0xd08a90), .55); if (up > -.1 && Math.sin(x * 120 + up * 31) * Math.sin(x * 77 - up * 53) > .72) col.multiplyScalar(.25); }
+    if (sp.pattern === 'trout') { if (kind === 'forelle' && Math.abs(up) < .18) col.lerp(new THREE.Color(0xd08a90), .55); if (up > -.1 && Math.sin(x * 120 + up * 31) * Math.sin(x * 77 - up * 53) > .72) col.multiplyScalar(.25); }
     if (sp.pattern === 'saddle' && up > -.2 && Math.sin(x * 26 + 1) > .55 && x > .15 && x < .85) col.multiplyScalar(.55);
     if (x > .93) col.multiplyScalar(.8);
   });

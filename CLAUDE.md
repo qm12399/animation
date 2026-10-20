@@ -9,7 +9,7 @@ Người dùng viết tiếng Việt, trả lời bằng tiếng Việt. Lời t
 1. `fischlogik/STYLEGUIDE.md`: chuẩn visual bắt buộc (màu, font, phụ đề, hook §5, thẻ tiêu đề §5b, âm thanh).
 2. `fischlogik/BRIEF.md`: khung hình, độ dài, những thứ phải giao.
 3. `fischlogik/SETUP.md`: cài đặt, lệnh sản xuất, các lỗi đã gặp.
-4. Tập gần nhất (`fischlogik/ep09/`): `index.html` là mẫu để copy, đọc `TREATMENT.md` để thấy cách chia cảnh.
+4. Tập gần nhất (`fischlogik/ep10/`): `index.html` là mẫu để copy, đọc `TREATMENT.md` để thấy cách chia cảnh.
 
 Không cần đọc lại toàn bộ engine. Chỉ mở file engine liên quan đến cảnh đang dựng (danh sách ở dưới).
 
@@ -68,12 +68,13 @@ Sửa một đoạn hỏng mà không render lại cả tập: mở trang với 
 | `section.js` | mặt cắt hồ (phân tầng nhiệt), mặt cắt bờ |
 | `river.js` | sông, trụ cầu, đá, kè |
 | `angler.js` | người câu cá với các pose (tung cần, đi bộ...) |
-| `fish.js` | barsch, hecht, rotauge, forelle, ukelei, zander; `makeFish`, `makeSchool` |
+| `fish.js` | barsch, hecht, rotauge, forelle, ukelei, zander, flunder (đặt `rotation.x = π/2`), meerforelle, wolfsbarsch; `makeFish`, `makeSchool` |
 | `lures.js` | 12 loại mồi, `makeLure(kind, scale, opts)` |
 | `pikejaw.js` | đầu cá chó cận cảnh có hàm mở + răng; `makeLeader` (fluoro/thick/steel) |
 | `weather.js` | `makeWeather(L).set(storm 0..1, t, sunPos)`: trời xanh có mặt trời → mây giông, gió gợn nước; `rain(g, t, k)`, `snow(g, t, k)`, `flash(t, t0)` cho mưa, tuyết, sét |
+| `beach.js` | bãi biển (Folge 10): `buildBeach()` bờ dọc trục x, biển hướng -z; rãnh 1 (d≈7), doi cát (d≈15) có sóng vỡ, khe dòng rút ở `RIPX`, kè đá ở `GX`; `groundY(x,z)`, `setUnder(on)`; `makeWorm/makeShrimp/makeCrab` |
 | `bird.js` | mòng biển |
-| `mix.py` | nhạc + ambience + sfx từ `events.json` và `audio.json`; sfx: swish plop dive whoosh cut thud dart gust tick ding gull swirl chug buzz ching reel strike snap saw thunder; bed: birds under wind creek river shop night rain |
+| `mix.py` | nhạc + ambience + sfx từ `events.json` và `audio.json`; sfx: swish plop dive whoosh cut thud dart gust tick ding gull swirl chug buzz ching reel strike snap saw thunder; bed: birds under wind creek river shop night rain surf |
 | `mux.sh` | ghép video + mix, loudnorm 2 lượt về -14 LUFS (dùng file này, không dùng core/render/mux.sh) |
 | `transcribe.py`, `srt.py` | Whisper small (de) → whisper_words.json; words.json → SRT giao kèm |
 
@@ -86,6 +87,8 @@ Sửa một đoạn hỏng mà không render lại cả tập: mở trang với 
 - Hàm cá chó nhìn chính diện thành một khối đỏ: dùng góc nghiêng.
 - Glow/point của một cảnh phải tắt `visible` ở các cảnh khác.
 - Gửi file trên 30 MB qua chat bị lỗi: gửi bản nén.
+- Cảnh sáng (cát, bọt sóng): giảm bloom (~.12, `thr: .95`), nếu không cả khung bị mờ nhòe.
+- Master render ra có thể trên 40 MB: nén lại `-crf 19 -preset slow` trước khi commit.
 
 ## Git
 

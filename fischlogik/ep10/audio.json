@@ -1,0 +1,6 @@
+{
+  "voice": "voice/voice.mp3", "voice_at": 0.0,
+  "env": [[0, 20.25, "surf"], [19.85, 30.65, "under"], [30.25, 60.0, "surf"], [35.3, 47.2, "wind"]],
+  "silence": [],
+  "music_end": 56.1
+}

@@ -69,6 +69,7 @@ def bed(kind, d):
             k = np.arange(int(.25 * SR)) / SR; ch = np.sin(2 * np.pi * 4300 * k) * (np.sin(2 * np.pi * 40 * k) > 0) * np.sin(np.pi * k / .25) * .012
             i0 = int((k0 + rng.uniform(0, .3)) * SR); x[i0:i0 + len(ch)] += ch
         return x
+    if kind == 'surf': tt = t_(d); sw = .55 + .45 * np.sin(2 * np.pi * .13 * tt) ** 2; return lp(n, 700) * .07 * sw + bp(noise(d), 900, 4000) * .02 * sw ** 2
     if kind == 'rain': return hp(noise(d), 1800) * .022 + bp(noise(d), 300, 1400) * .02
     if kind == 'shop': return lp(hp(n, 200), 1500) * .012
     if kind == 'river': return bp(n, 200, 2600) * .07 * (1 + .25 * np.sin(2 * np.pi * .4 * t_(d))) + lp(n, 160) * .05
